@@ -1,4 +1,4 @@
-classdef Odrive < matlab.System ...
+classdef ODrive < matlab.System ...
         & coder.ExternalDependency ...
         & matlab.system.mixin.Propagates ...
         & matlab.system.mixin.CustomIcon
@@ -15,24 +15,49 @@ classdef Odrive < matlab.System ...
     
     properties (Nontunable)
         Port = '/dev/ttyS0'
-        Baud = 500000
-        Modules = uint8(1:16)
-        Mode = 'PWM';
+    end
+
+    properties(Nontunable, PositiveInteger)
+        Baudrate = 115200
     end
     
     properties (Nontunable, Logical)
-        Trigger=false;
-        % Collect meassured currents
-        Currents=false;
-        % Optimized comunication
-        OptimizedComunication=false;
-        % Green LED Off
-        GreenLedOff=false;
+        EnableAxis0 = true; % Enable
+        EnableAxis1 = true; % Enable
+        EnableVbusOutput = false; % Enable vbus_voltage output
+        EnableCurrent0Output = false; % Enable estimated current output
+        EnablePosition0Output = false; % Enable estimated position output
+        EnableVelocity0Output = false; % Enable estimated velocity output
+        EnableCurrent1Output = false; % Enable estimated current output
+        EnablePosition1Output = false; % Enable estimated position output
+        EnableVelocity1Output = false; % Enable estimated veloctity output
     end
-
+    
+    properties(Nontunable)
+        ControlMode0 = 'Position Control' % Control Mode
+        ControlMode1 = 'Position Control' % Control Mode
+    end
+    
     properties(Constant, Hidden)
-        ModeSet = matlab.system.StringSet({'PWM','Currents'});
-        %BaudSet = matlab.system.StringSet({'230400','1500000'});
+        ControlMode0Set = matlab.system.StringSet({'Position Control','Velocity Control','Current Control'})
+        ControlMode1Set = matlab.system.StringSet({'Position Control','Velocity Control','Current Control'})
+    end
+    
+    properties(Nontunable)
+        VelocityLimit0 = 3*pi; % Velocity limit [rad/s]
+        VelocityLimit1 = 3*pi; % Velocity limit [rad/s]
+        CurrentLimit0 = 100; % Current limit [A]
+        CurrentLimit1 = 100; % Current limit [A]
+        
+        CountsPerRotate0 = 8192; % Counts per rotate of encoder
+        CountsPerRotate1 = 8192; % Counts per rotate of encoder
+       
+        Inputs = ''; % Aditional inputs
+        Outputs = ''; % Aditional outputs
+    end
+    
+    properties(Nontunable, Logical)
+        enableVBusRead = false
     end
     
     properties (Access = private)
@@ -52,16 +77,11 @@ classdef Odrive < matlab.System ...
             if isempty(coder.target)
                 % Place simulation setup code here
             else
-                coder.cinclude('magman.h');
+                coder.cinclude('odrive.h');
                 % Call C-function implementing device initialization
-                if ~isempty(obj.Port)
-                    coder.ceval('magman_open', [obj.Port 0], int32(obj.Baud));
-                end
-                coder.ceval('magman_zeros', obj.Trigger);
-                coder.ceval('magman_on');
-                if(obj.GreenLedOff)
-                    coder.ceval('magman_led', 0, 0, 0, 0);
-                end
+%                 if ~isempty(obj.Port)
+%                     coder.ceval('magman_open', [obj.Port 0], int32(obj.Baud));
+%                 end
             end
         end
         
@@ -69,24 +89,7 @@ classdef Odrive < matlab.System ...
             if isempty(coder.target)
                 % Place simulation output code here 
             else
-                m = uint8(obj.Modules);
-                % Call C-function implementing device output
-                if strcmp(obj.Mode, 'PWM')
-                    %void magman_setModules(uint8_t modules[], uint8_T len, real_T data[])
-                    coder.ceval('magman_setModules', coder.rref(m), uint8(length(obj.Modules)), u, obj.Trigger, obj.OptimizedComunication)
-                elseif strcmp(obj.Mode, 'Currents')
-                    %void magman_setModulesCurrent(uint8_T modules[], uint8_T len, real_T current[],uint8_T trigger);
-                    coder.ceval('magman_setModulesCurrents', coder.rref(m), uint8(length(obj.Modules)), u, obj.Trigger, obj.OptimizedComunication)
-                end
-                if obj.Currents
-                    currents = zeros(4, length(obj.Modules));
-                    %void magman_getCurrents(const uint8_T modules[], const uint8_T len, real_T currents[]);
-                    coder.ceval('magman_getCurrents', coder.rref(m), uint8(length(obj.Modules)), coder.wref(currents));
-                    
-                    %int magman_getCurrentsFromModule(const uint8_T module, real_T currents[]);
-                    %coder.ceval('magman_getCurrentsFromModule', uint8(22), coder.wref(currents));
-                    varargout{1} = currents;
-                end
+                
             end
         end
         
@@ -95,23 +98,57 @@ classdef Odrive < matlab.System ...
                 % Place simulation termination code here
             else
                 % Call C-function implementing device termination
-                coder.ceval('magman_off')
-                %coder.ceval('sink_terminate');
+            end
+        end
+        
+        function inputs = getAllInputs(obj)
+            n = 1;
+            inputs = {};
+            if obj.EnableAxis0
+                mode = strsplit(obj.ControlMode0);
+                inputs{n} = ['Axis0 Refernce ', lower(mode{1})];
+                n = n+1;
+            end
+            if obj.EnableAxis1
+                mode = strsplit(obj.ControlMode1);
+                inputs{n} = ['Axis1 Refernce ', lower(mode{1})];
+                n = n+1;
+            end
+            
+            if ~isempty(obj.Inputs)
+                for out = strsplit(obj.Inputs, ',')
+                    inputs{n} = out{1};
+                    n = n+1;
+                end
+            end
+        end
+        
+        function outputs = getAllOutputs(obj)
+            n = 1;
+            outputs = {};
+            
+            if obj.EnableVbusOutput
+                outputs{n} = 'vbus_voltage';
+                n = n+1;
+            end
+            
+            if ~isempty(obj.Outputs)
+                for out = strsplit(obj.Outputs, ',')
+                    outputs{n} = out{1};
+                    n = n+1;
+                end
             end
         end
     end
     
     methods (Access=protected)
         %% Define input properties
-        function num = getNumInputsImpl(~)
-                num = 1;
+        function num = getNumInputsImpl(obj)
+            num = length(obj.getAllInputs());
         end
         
         function num = getNumOutputsImpl(obj)
-            num = 0;
-            if obj.Currents
-                num = 1;
-            end
+            num = length(obj.getAllOutputs());
         end
         
         function flag = isInputSizeLockedImpl(~,~)
@@ -138,38 +175,56 @@ classdef Odrive < matlab.System ...
         
         function icon = getIconImpl(obj)
             % Define a string as the icon for the System block in Simulink.
-            if ~isempty(obj.Port)
-                icon = sprintf('MagMan coils\n%d modules\n Port: %s\n Baudrate: %d', length(obj.Modules), obj.Port, obj.Baud);
+            if isempty(obj.Port) 
+                icon = sprintf('ODrive\n');
+            elseif any(startsWith(obj.Port, ["/dev/ttyACM", "/dev/ttyUSB"]))
+                icon = sprintf('ODrive USB\nPort: %s', obj.Port);
             else
-                icon = sprintf('MagMan coils\n%d modules', length(obj.Modules));
-            end
-            
-            if obj.Trigger
-                icon = ['Triggered ' icon];
-            end
-            
-            if obj.OptimizedComunication
-                icon = [icon '\nOptimized comunication'];
+                icon = sprintf('ODrive\nPort: %s\n Baudrate: %d', obj.Port, obj.Baudrate);      
             end
         end
 
-        function name = getInputNamesImpl(obj)
+        function varargout = getInputNamesImpl(obj)
             % Return input port names for System block
-            name = obj.Mode;
+            varargout = getAllInputs(obj);
         end
 
         function varargout = getOutputNamesImpl(obj)
             % Return output port names for System block
-            if obj.Currents
-                varargout{1} = 'Currents';
-            end
+            varargout = getAllOutputs(obj);
         end
     end
     
     methods (Static, Access=protected)
         function header = getHeaderImpl
             % Define header panel for System block dialog
-           header = matlab.system.display.Header(mfilename('class'), 'Title', Coils.getDescriptiveName());
+           header = matlab.system.display.Header(mfilename('class'), 'Title', ODrive.getDescriptiveName());
+        end
+
+        function groups = getPropertyGroupsImpl
+            % Define property section(s) for System block dialog
+            % group = matlab.system.display.Section(mfilename("class"));
+           configGroup = matlab.system.display.Section(...
+               'Title','ODrive configuration',...
+               'PropertyList',{'Port','Baudrate'});
+                     
+           axis0Group = matlab.system.display.SectionGroup(...
+               'Title','Axis 0', ...
+               'PropertyList',{'EnableAxis0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0', 'EnableCurrent0Output', 'EnablePosition0Output', 'EnableVelocity0Output'});
+           
+           axis1Group = matlab.system.display.SectionGroup(...
+               'Title','Axis 1', ...
+               'PropertyList',{'EnableAxis1','ControlMode1','VelocityLimit1', 'CurrentLimit1', 'CountsPerRotate1', 'EnableCurrent1Output', 'EnablePosition1Output', 'EnableVelocity1Output'});
+           
+           inputsGroup = matlab.system.display.SectionGroup(...
+               'Title','Inputs', ...
+               'PropertyList',{'Inputs'});
+           
+           outputsGroup = matlab.system.display.SectionGroup(...
+               'Title','Outputs', ...
+               'PropertyList',{'EnableVbusOutput','Outputs'});
+
+           groups = [configGroup, axis0Group, axis1Group, inputsGroup, outputsGroup];
         end
 
         function simMode = getSimulateUsingImpl(~)
@@ -184,7 +239,7 @@ classdef Odrive < matlab.System ...
     
     methods (Static)
         function name = getDescriptiveName()
-            name = 'MagMan Coils';
+            name = 'ODrive';
         end
         
         function b = isSupportedContext(context)
@@ -199,9 +254,8 @@ classdef Odrive < matlab.System ...
                 addIncludePaths(buildInfo,includeDir);
                 % Use the following API's to add include files, sources and
                 % linker flags
-                addIncludeFiles(buildInfo,'magman.h',includeDir);
-                addSourceFiles(buildInfo,'magman.c',srcDir);
-                addLinkFlags(buildInfo,{'-lwiringPi'});
+                addIncludeFiles(buildInfo,'odrive.h',includeDir);
+                addSourceFiles(buildInfo,'odrive.c',srcDir);
                 %addLinkObjects(buildInfo,'sourcelib.a',srcDir);
                 %addCompileFlags(buildInfo,{'-D_DEBUG=1'});
                 %addDefines(buildInfo,'MY_DEFINE_1')
