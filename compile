@@ -1,0 +1,1 @@
+gcc src/odrive.c -g -o odrive_test -Iinclude $@
