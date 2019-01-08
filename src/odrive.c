@@ -59,12 +59,12 @@ static void set_mincount(int fd, int mcount)
 		printf("Error tcsetattr: %s\n", strerror(errno));
 }
 
-FILE* odrive_open_port(char *portname, int baudrate){
+int odrive_open_port(char *portname, int baudrate){
 	int fd;
 	fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
 	if (fd < 0) {
 		printf("Error opening %s: %s\n", portname, strerror(errno));
-		return NULL;
+		return 0;
 	}
 
 	int speed = 0;
@@ -73,17 +73,18 @@ FILE* odrive_open_port(char *portname, int baudrate){
 		case 115200: speed = B115200; break;
 		default:
 			printf("Unknown baudrate %d\n", baudrate);
-			return NULL;
+			return 0;
 	}
 
 	/*baudrate 115200, 8 bits, no parity, 1 stop bit */
 	set_interface_attribs(fd, speed);
 	//set_mincount(fd, 0);                /* set to pure timed read */3
 
-	return fdopen(fd, "r+");
+	return (int) fdopen(fd, "r+");
 }
 
-float odrive_read_float(FILE *fp, const char parameter[]){
+float odrive_read_float(int f, const char parameter[]){
+	FILE *fp = (FILE *) f;
 	float value=-1;
 	char line[60];
 	if(parameter != NULL){
@@ -100,7 +101,8 @@ float odrive_read_float(FILE *fp, const char parameter[]){
 	return value;
 }
 
-int odrive_read_int(FILE *fp, const char parameter[]){
+int odrive_read_int(int f, const char parameter[]){
+	FILE *fp = (FILE *) f;
 	int value=-1; 
 	char line[60];
 	if(parameter != NULL){
@@ -117,25 +119,28 @@ int odrive_read_int(FILE *fp, const char parameter[]){
 	return value;
 }
 
-void odrive_write_float(FILE *fp, const char parameter[], const float value){
+void odrive_write_float(int f, const char parameter[], const float value){
+	FILE *fp = (FILE *) f;
 	fprintf(fp, "w %s %f\n", parameter, value);
 }
 
-void odrive_write_int(FILE *fp, const char parameter[], const int value){
+void odrive_write_int(int f, const char parameter[], const int value){
+	FILE *fp = (FILE *) f;
 	fprintf(fp, "w %s %d\n", parameter, value);
 }
 
-void odrive_quick_write(FILE *fp, const char type, const int axis, const float value){
+void odrive_quick_write(int f, const char type, const int axis, const float value){
+	FILE *fp = (FILE *) f;
 	fprintf(fp, "%c %d %f\n", type, axis, value);
 }
 
-float odrive_vbus_voltage(FILE *fp){
-	return odrive_read_float(fp, "vbus_voltage");
+float odrive_vbus_voltage(int f){
+	return odrive_read_float(f, "vbus_voltage");
 }
 
-int odrive_check_calibration(FILE *fp, const int axis){
-	if(!odrive_read_int(fp, "odrv0.axis0.motor.is_calibrated")) return -1;
-	if(!odrive_read_int(fp, "odrv0.axis0.encoder.is_ready")) return -2;
+int odrive_check_calibration(int f, const int axis){
+	if(!odrive_read_int(f, "odrv0.axis0.motor.is_calibrated")) return -1;
+	if(!odrive_read_int(f, "odrv0.axis0.encoder.is_ready")) return -2;
 	return 0;
 }
 
@@ -146,14 +151,14 @@ void printHelp(int argc, char *argv[]){
 	printf("Usage: %s port\n", argv[0]);
 }
 
-typedef void (*test_function)(FILE *fp, int argc, char *argv[]);
+typedef void (*test_function)(int f, int argc, char *argv[]);
 
 static double TimeSpecToSeconds(struct timespec* ts)
 {
     return (double)ts->tv_sec + (double)ts->tv_nsec / 1000000000.0;
 }
 
-void test1(FILE *fp, int argc, char *argv[]){
+void test1(int f, int argc, char *argv[]){
 	struct timespec start;
     struct timespec end;
     double elapsedSeconds;
@@ -166,7 +171,7 @@ void test1(FILE *fp, int argc, char *argv[]){
     // Timed area, use only code which should be measured
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	for(int i=0; i<iter; i++){
-		odrive_read_float(fp, parameter);
+		odrive_read_float(f, parameter);
 	}
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	// End of timed area
@@ -177,7 +182,7 @@ void test1(FILE *fp, int argc, char *argv[]){
 		elapsedSeconds*1000/iter);
 }
 
-void test2(FILE *fp, int argc, char *argv[]){
+void test2(int f, int argc, char *argv[]){
 	struct timespec start;
     struct timespec end;
     double elapsedSeconds;
@@ -191,11 +196,11 @@ void test2(FILE *fp, int argc, char *argv[]){
 	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	for(int i=0; i<iter; i++){
-		fprintf(fp, "r %s\n", parameter);
+		fprintf((FILE *)f, "r %s\n", parameter);
 	}
 
 	for(int i=0; i<iter; i++){
-		odrive_read_float(fp, NULL);
+		odrive_read_float(f, NULL);
 	}
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	// End of timed area
@@ -206,7 +211,7 @@ void test2(FILE *fp, int argc, char *argv[]){
 		elapsedSeconds*1000/iter);
 }
 
-void test3(FILE *fp, int argc, char *argv[]){
+void test3(int f, int argc, char *argv[]){
 	struct timespec start;
     struct timespec end;
     double elapsedSeconds;
@@ -215,10 +220,10 @@ void test3(FILE *fp, int argc, char *argv[]){
     // Timed area, use only code which should be measured
 	clock_gettime(CLOCK_MONOTONIC, &start);
 
-	fprintf(fp, "r vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\n");
+	fprintf((FILE *)f, "r vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\n");
 
 	for(int i=0; i<8; i++){
-		odrive_read_float(fp, NULL);
+		odrive_read_float(f, NULL);
 	}
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	// End of timed area
@@ -232,28 +237,27 @@ void test3(FILE *fp, int argc, char *argv[]){
 int main(int argc, char *argv[])
 {
 	test_function tests[] = {test1, test1, test2, test3};
-
 	if(argc < 2){
 		printf("Error: Not enough arguments\n");	
 		printHelp(argc, argv);
 		return -2;
 	}
-	FILE* fp = odrive_open_port(argv[1], 115200);
+	int f = odrive_open_port(argv[1], 115200);
 
 	if(argc < 3){
-		printf("axis0.encoder.pos_estimate: %f\n", odrive_read_float(fp, "axis0.encoder.pos_estimate"));
-		printf("vbus_voltage: %f V\n", vbus_voltage(fp));
-		printf("axis0.current_state: %d\n", odrive_read_int(fp, "axis0.current_state"));
-		printf("axis0.encoder.is_ready: %s\n", odrive_read_int(fp, "axis0.encoder.is_ready")?"True":"False");
+		printf("axis0.encoder.pos_estimate: %f\n", odrive_read_float(f, "axis0.encoder.pos_estimate"));
+		printf("vbus_voltage: %f V\n", odrive_vbus_voltage(f));
+		printf("axis0.current_state: %d\n", odrive_read_int(f, "axis0.current_state"));
+		printf("axis0.encoder.is_ready: %s\n", odrive_read_int(f, "axis0.encoder.is_ready")?"True":"False");
 	}else{
 		int test_id = atoi(argv[2]);
 		if(test_id >= (sizeof(tests)/sizeof(test_function))){
 			printf("Test %d does not exists\n", test_id);
 		}else{
 			printf("Running test %d\n", test_id);
-			tests[test_id](fp, argc-2, argv+2);
+			tests[test_id](f, argc-2, argv+2);
 		}		
 	}
-	fclose(fp);
+	fclose((FILE *) f);
 }
 #endif
