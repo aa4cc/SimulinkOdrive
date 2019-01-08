@@ -1,6 +1,8 @@
 #ifndef ODRIVE_H
 #define ODRIVE_H
 
+#include <stdio.h>
+
 FILE* odrive_open_port(char *portname, int baudrate);
 float odrive_read_float(FILE *fp, const char parameter[]);
 int odrive_read_int(FILE *fp, const char parameter[]);
