@@ -8,7 +8,7 @@
 
 #include "odrive.h"
 
-int set_interface_attribs(int fd, int speed)
+static int set_interface_attribs(int fd, int speed)
 {
 	struct termios tty;
 
@@ -43,7 +43,7 @@ int set_interface_attribs(int fd, int speed)
 	return 0;
 }
 
-void set_mincount(int fd, int mcount)
+static void set_mincount(int fd, int mcount)
 {
 	struct termios tty;
 
@@ -59,7 +59,7 @@ void set_mincount(int fd, int mcount)
 		printf("Error tcsetattr: %s\n", strerror(errno));
 }
 
-FILE* open_port(char *portname, int baudrate){
+FILE* odrive_open_port(char *portname, int baudrate){
 	int fd;
 	fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
 	if (fd < 0) {
@@ -67,14 +67,23 @@ FILE* open_port(char *portname, int baudrate){
 		return NULL;
 	}
 
+	int speed = 0;
+
+	switch(baudrate){
+		case 115200: speed = B115200; break;
+		default:
+			printf("Unknown baudrate %d\n", baudrate);
+			return NULL;
+	}
+
 	/*baudrate 115200, 8 bits, no parity, 1 stop bit */
-	set_interface_attribs(fd, B115200);
+	set_interface_attribs(fd, speed);
 	//set_mincount(fd, 0);                /* set to pure timed read */3
 
 	return fdopen(fd, "r+");
 }
 
-float read_float(FILE *fp, const char parameter[]){
+float odrive_read_float(FILE *fp, const char parameter[]){
 	float value=-1;
 	char line[60];
 	if(parameter != NULL){
@@ -91,7 +100,7 @@ float read_float(FILE *fp, const char parameter[]){
 	return value;
 }
 
-int read_int(FILE *fp, const char parameter[]){
+int odrive_read_int(FILE *fp, const char parameter[]){
 	int value=-1; 
 	char line[60];
 	if(parameter != NULL){
@@ -108,8 +117,26 @@ int read_int(FILE *fp, const char parameter[]){
 	return value;
 }
 
-float vbus_voltage(FILE *fp){
-	return read_float(fp, "vbus_voltage");
+void odrive_write_float(FILE *fp, const char parameter[], const float value){
+	fprintf(fp, "w %s %f\n", parameter, value);
+}
+
+void odrive_write_int(FILE *fp, const char parameter[], const int value){
+	fprintf(fp, "w %s %d\n", parameter, value);
+}
+
+void odrive_quick_write(FILE *fp, const char type, const int axis, const float value){
+	fprintf(fp, "%c %d %f\n", type, axis, value);
+}
+
+float odrive_vbus_voltage(FILE *fp){
+	return odrive_read_float(fp, "vbus_voltage");
+}
+
+int odrive_check_calibration(FILE *fp, const int axis){
+	if(!odrive_read_int(fp, "odrv0.axis0.motor.is_calibrated")) return -1;
+	if(!odrive_read_int(fp, "odrv0.axis0.encoder.is_ready")) return -2;
+	return 0;
 }
 
 #ifdef DEBUG
@@ -117,14 +144,6 @@ float vbus_voltage(FILE *fp){
 
 void printHelp(int argc, char *argv[]){
 	printf("Usage: %s port\n", argv[0]);
-}
-
-void dump(FILE *fp){
-	char ch;
-	while(1){
-		if(fread(&ch, 1, 1, fp)) printf("ascii(%d) = \"%c\"\n", (int) ch, ch);
-		usleep(10000);
-	}
 }
 
 typedef void (*test_function)(FILE *fp, int argc, char *argv[]);
@@ -147,7 +166,7 @@ void test1(FILE *fp, int argc, char *argv[]){
     // Timed area, use only code which should be measured
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	for(int i=0; i<iter; i++){
-		read_float(fp, parameter);
+		odrive_read_float(fp, parameter);
 	}
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	// End of timed area
@@ -158,22 +177,74 @@ void test1(FILE *fp, int argc, char *argv[]){
 		elapsedSeconds*1000/iter);
 }
 
+void test2(FILE *fp, int argc, char *argv[]){
+	struct timespec start;
+    struct timespec end;
+    double elapsedSeconds;
+    int iter = 10;
+    char *parameter = "vbus_voltage";
+    if(argc>1) iter = atoi(argv[1]);
+    if(argc>2) parameter = argv[2];
+
+    printf("Testing %d iterations of reading\n", iter);
+    // Timed area, use only code which should be measured
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
+	for(int i=0; i<iter; i++){
+		fprintf(fp, "r %s\n", parameter);
+	}
+
+	for(int i=0; i<iter; i++){
+		odrive_read_float(fp, NULL);
+	}
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	// End of timed area
+
+	elapsedSeconds = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+	printf("Time elapsed: %f ms (per read %f ms)\n",
+		elapsedSeconds*1000,
+		elapsedSeconds*1000/iter);
+}
+
+void test3(FILE *fp, int argc, char *argv[]){
+	struct timespec start;
+    struct timespec end;
+    double elapsedSeconds;
+
+    printf("Testing 8 iterations of reading\n");
+    // Timed area, use only code which should be measured
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
+	fprintf(fp, "r vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\n");
+
+	for(int i=0; i<8; i++){
+		odrive_read_float(fp, NULL);
+	}
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	// End of timed area
+
+	elapsedSeconds = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+	printf("Time elapsed: %f ms (per read %f ms)\n",
+		elapsedSeconds*1000,
+		elapsedSeconds*1000/8);
+}
+
 int main(int argc, char *argv[])
 {
-	test_function tests[] = {test1, test1};
+	test_function tests[] = {test1, test1, test2, test3};
 
 	if(argc < 2){
 		printf("Error: Not enough arguments\n");	
 		printHelp(argc, argv);
 		return -2;
 	}
-	FILE* fp = open_port(argv[1], 115200);
+	FILE* fp = odrive_open_port(argv[1], 115200);
 
 	if(argc < 3){
-		printf("axis0.encoder.pos_estimate: %f\n", read_float(fp, "axis0.encoder.pos_estimate"));
+		printf("axis0.encoder.pos_estimate: %f\n", odrive_read_float(fp, "axis0.encoder.pos_estimate"));
 		printf("vbus_voltage: %f V\n", vbus_voltage(fp));
-		printf("axis0.current_state: %d\n", read_int(fp, "axis0.current_state"));
-		printf("axis0.encoder.is_ready: %s\n", read_int(fp, "axis0.encoder.is_ready")?"True":"False");
+		printf("axis0.current_state: %d\n", odrive_read_int(fp, "axis0.current_state"));
+		printf("axis0.encoder.is_ready: %s\n", odrive_read_int(fp, "axis0.encoder.is_ready")?"True":"False");
 	}else{
 		int test_id = atoi(argv[2]);
 		if(test_id >= (sizeof(tests)/sizeof(test_function))){
