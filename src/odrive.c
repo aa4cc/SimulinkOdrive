@@ -8,6 +8,8 @@
 
 #include "odrive.h"
 
+#define DEBUG_COMUNICATION
+
 static int set_interface_attribs(int fd, int speed)
 {
 	struct termios tty;
