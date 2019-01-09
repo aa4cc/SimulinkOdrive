@@ -281,63 +281,41 @@ void test4(int f, int argc, char *argv[]){
 	int use_index=1;
 	odrive_write_int(f, "axis0.encoder.config.use_index", use_index);
 
-	int motor_calibration = !odrive_read_int(f, "axis0.motor.is_calibrated");
+	int motor_is_calibrated = odrive_read_int(f, "axis0.motor.is_calibrated");
 	int encoder_is_ready = odrive_read_int(f, "axis0.encoder.is_ready");
 
-	int encoder_small_calib = 0;
-	int encoder_big_calib = 0;
-
-	printf("motor_is_calibrated: %s\n", !motor_calibration?"True":"False");
+	printf("motor_is_calibrated: %s\n", motor_is_calibrated?"True":"False");
 	printf("encoder_is_ready: %s\n", encoder_is_ready?"True":"False");
+
+	odrive_write_int(f, "axis0.config.startup_motor_calibration", !motor_is_calibrated);
 
 	if(!encoder_is_ready){
 		printf("Trying to encoder get ready\n");
+		odrive_write_int(f, "axis0.config.startup_encoder_index_search", 1);
 		if(use_index){
 			printf("Using index\n");
 			if(odrive_read_int(f, "axis0.encoder.config.pre_calibrated")){
-				encoder_small_calib = 1;
+				odrive_write_int(f, "axis0.config.startup_encoder_offset_calibration", 0);
 			}else{
-				encoder_big_calib = 1;
+				odrive_write_int(f, "axis0.config.startup_encoder_offset_calibration", 1);
 			}
 		}else{
-			printf("Not using index");
-			encoder_big_calib = 1;
-		}	
+			odrive_write_int(f, "axis0.config.startup_encoder_offset_calibration", 1);
+		}
+	}else{
+		odrive_write_int(f, "axis0.config.startup_encoder_index_search", 0);
+		odrive_write_int(f, "axis0.config.startup_encoder_offset_calibration", 0);
 	}
 
-	if(motor_calibration && encoder_big_calib){
-		odrive_write_int(f, "axis0.requested_state", 3);
-		odrive_wait_for_state(f, 0, 1, 100000, 0);
-		return;
-	}
-
-	if(motor_calibration){
-		odrive_write_int(f, "axis0.requested_state", 4);
-		odrive_wait_for_state(f, 0, 1, 100000, 0);
-	}
-
-	if(encoder_small_calib){
-		odrive_write_int(f, "axis0.requested_state", 6);
-		odrive_wait_for_state(f, 0, 1, 100000, 0);
-	}
-
-	if(encoder_big_calib){
-		odrive_write_int(f, "axis0.requested_state", 7);
-		odrive_wait_for_state(f, 0, 1, 100000, 0);
-	}
-}
-
-void test5(int f, int argc, char *argv[]){
-	printf("Requesting new state...\n");
 	odrive_request_state(f, /*axis=*/0, 2);
 	//usleep(1000000);
-	//printf("Waiting for get ready\n");
-	//odrive_wait_for_state(f, 0, 1, 1000000, 0);
+	printf("Waiting for get ready\n");
+	odrive_wait_for_state(f, 0, 1, 1000000, 0);
 }
 
 int main(int argc, char *argv[])
 {
-	test_function tests[] = {test1, test1, test2, test3, test4, test5};
+	test_function tests[] = {test1, test1, test2, test3, test4};
 	if(argc < 2){
 		printf("Error: Not enough arguments\n");	
 		printHelp(argc, argv);
