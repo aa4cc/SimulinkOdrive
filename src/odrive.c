@@ -8,7 +8,7 @@
 
 #include "odrive.h"
 
-#define DEBUG_COMUNICATION
+//#define DEBUG_COMUNICATION
 
 static int set_interface_attribs(int fd, int speed)
 {
