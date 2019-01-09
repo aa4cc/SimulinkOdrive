@@ -11,5 +11,7 @@ void odrive_write_int(int fp, const char parameter[], const int value);
 void odrive_quick_write(int fp, const char type, const int axis, const float value);
 float odrive_vbus_voltage(int fp);
 int odrive_check_calibration(int fp, const int axis);
+int odrive_wait_for_state(int fp, const int axis, const int requested_state, const int _usleep, int n_timeout);
+int odrive_request_state(int fp, const int axis, const int requested_state);
 
 #endif

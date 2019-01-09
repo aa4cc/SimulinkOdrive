@@ -89,15 +89,24 @@ float odrive_read_float(int f, const char parameter[]){
 	char line[60];
 	if(parameter != NULL){
 		fprintf(fp, "r %s\n", parameter);
+#ifdef DEBUG_COMUNICATION
+		printf("WRITE:r %s\n", parameter);
+#endif
 	}
 	if(fgets(line, 60, fp) == NULL){
 		printf("Reading parameter \"%s\" error, no reply", parameter);
 		return -1;
 	}
+#ifdef DEBUG_COMUNICATION
+		printf("READ:%s ", line);
+#endif
 	if(sscanf(line, "%f", &value) != 1){
 		printf("Reading parameter \"%s\" error, reply: %s", parameter, line);
 		return -1;
 	}
+#ifdef DEBUG_COMUNICATION
+		printf("VALUE: %f\n", value);
+#endif
 	return value;
 }
 
@@ -107,40 +116,74 @@ int odrive_read_int(int f, const char parameter[]){
 	char line[60];
 	if(parameter != NULL){
 		fprintf(fp, "r %s\n", parameter);
+#ifdef DEBUG_COMUNICATION
+		printf("WRITE:r %s\n", parameter);
+#endif
 	}
 	if(fgets(line, 60, fp) == NULL){
 		printf("Reading parameter \"%s\" error, no reply", parameter);
 		return -1;
 	}
+#ifdef DEBUG_COMUNICATION
+		printf("READ:%s", line);
+#endif
 	if(sscanf(line, "%d", &value) != 1){
 		printf("Reading parameter \"%s\" error, reply: %s", parameter, line);
 		return -1;
 	}
+#ifdef DEBUG_COMUNICATION
+		printf("VALUE: %d\n", value);
+#endif
 	return value;
 }
 
 void odrive_write_float(int f, const char parameter[], const float value){
 	FILE *fp = (FILE *) f;
 	fprintf(fp, "w %s %f\n", parameter, value);
+#ifdef DEBUG_COMUNICATION
+	printf("WRITE:w %s %f\n", parameter, value);
+#endif
 }
 
 void odrive_write_int(int f, const char parameter[], const int value){
 	FILE *fp = (FILE *) f;
 	fprintf(fp, "w %s %d\n", parameter, value);
+#ifdef DEBUG_COMUNICATION
+	printf("WRITE:w %s %d\n", parameter, value);
+#endif
 }
 
 void odrive_quick_write(int f, const char type, const int axis, const float value){
 	FILE *fp = (FILE *) f;
 	fprintf(fp, "%c %d %f\n", type, axis, value);
+#ifdef DEBUG_COMUNICATION
+	printf("WRITE:%c %d %f\n\n", type, axis, value);
+#endif
 }
 
 float odrive_vbus_voltage(int f){
 	return odrive_read_float(f, "vbus_voltage");
 }
 
-int odrive_check_calibration(int f, const int axis){
-	if(!odrive_read_int(f, "odrv0.axis0.motor.is_calibrated")) return -1;
-	if(!odrive_read_int(f, "odrv0.axis0.encoder.is_ready")) return -2;
+int odrive_wait_for_state(int fp, const int axis, const int requested_state, const int _usleep, int n_timeout){
+	char parameter[100];
+	sprintf(parameter, "axis%d.current_state", axis);
+	int state=0;
+	while(1){
+		state = odrive_read_int(fp, parameter);
+		if(state==requested_state) return 1;
+		if(_usleep) usleep(_usleep);
+		if(n_timeout == 0) continue;
+		n_timeout--;
+		if(n_timeout == 0) return 0;
+	}
+
+	return 0;
+}
+int odrive_request_state(int fp, const int axis, const int requested_state){
+	char parameter[100];
+	sprintf(parameter, "axis%d.requested_state", axis);
+	odrive_write_int(fp, parameter, requested_state);
 	return 0;
 }
 
@@ -234,9 +277,67 @@ void test3(int f, int argc, char *argv[]){
 		elapsedSeconds*1000/8);
 }
 
+void test4(int f, int argc, char *argv[]){
+	int use_index=1;
+	odrive_write_int(f, "axis0.encoder.config.use_index", use_index);
+
+	int motor_calibration = !odrive_read_int(f, "axis0.motor.is_calibrated");
+	int encoder_is_ready = odrive_read_int(f, "axis0.encoder.is_ready");
+
+	int encoder_small_calib = 0;
+	int encoder_big_calib = 0;
+
+	printf("motor_is_calibrated: %s\n", !motor_calibration?"True":"False");
+	printf("encoder_is_ready: %s\n", encoder_is_ready?"True":"False");
+
+	if(!encoder_is_ready){
+		printf("Trying to encoder get ready\n");
+		if(use_index){
+			printf("Using index\n");
+			if(odrive_read_int(f, "axis0.encoder.config.pre_calibrated")){
+				encoder_small_calib = 1;
+			}else{
+				encoder_big_calib = 1;
+			}
+		}else{
+			printf("Not using index");
+			encoder_big_calib = 1;
+		}	
+	}
+
+	if(motor_calibration && encoder_big_calib){
+		odrive_write_int(f, "axis0.requested_state", 3);
+		odrive_wait_for_state(f, 0, 1, 100000, 0);
+		return;
+	}
+
+	if(motor_calibration){
+		odrive_write_int(f, "axis0.requested_state", 4);
+		odrive_wait_for_state(f, 0, 1, 100000, 0);
+	}
+
+	if(encoder_small_calib){
+		odrive_write_int(f, "axis0.requested_state", 6);
+		odrive_wait_for_state(f, 0, 1, 100000, 0);
+	}
+
+	if(encoder_big_calib){
+		odrive_write_int(f, "axis0.requested_state", 7);
+		odrive_wait_for_state(f, 0, 1, 100000, 0);
+	}
+}
+
+void test5(int f, int argc, char *argv[]){
+	printf("Requesting new state...\n");
+	odrive_request_state(f, /*axis=*/0, 2);
+	//usleep(1000000);
+	//printf("Waiting for get ready\n");
+	//odrive_wait_for_state(f, 0, 1, 1000000, 0);
+}
+
 int main(int argc, char *argv[])
 {
-	test_function tests[] = {test1, test1, test2, test3};
+	test_function tests[] = {test1, test1, test2, test3, test4, test5};
 	if(argc < 2){
 		printf("Error: Not enough arguments\n");	
 		printHelp(argc, argv);
