@@ -51,10 +51,10 @@ classdef ODrive < matlab.System ...
     end
     
     properties(Nontunable)
-        VelocityLimit0 = 10*pi; % Velocity limit [rad/s]
-        VelocityLimit1 = 10*pi; % Velocity limit [rad/s]
-        CurrentLimit0 = 100; % Current limit [A]
-        CurrentLimit1 = 100; % Current limit [A]
+        VelocityLimit0 = 20*pi; % Velocity limit [rad/s]
+        VelocityLimit1 = 20*pi; % Velocity limit [rad/s]
+        CurrentLimit0 = 65; % Current limit [A]
+        CurrentLimit1 = 65; % Current limit [A]
         
         CountsPerRotate0 = 8192; % Counts per rotate of encoder
         CountsPerRotate1 = 8192; % Counts per rotate of encoder
@@ -230,7 +230,8 @@ classdef ODrive < matlab.System ...
                 end
             else
                 for ind = 1:1
-                    %coder.ceval('odrive_write_float', obj.portFilePointer, cstring('odrv0.axis0.controller.pos_setpoint'), varargin{1});
+                    %coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis0.controller.pos_setpoint'), varargin{1});
+                    coder.ceval('odrive_quick_write', obj.portFilePointer, int8('p'), int32(0), varargin{1});
                 end
                 for ind = 1:1
                     varargout{ind} = 0;
@@ -244,12 +245,12 @@ classdef ODrive < matlab.System ...
                 % Place simulation termination code here
             else
                 % Call C-function implementing device termination
-%                 if obj.EnableAxis0
-%                     coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.requested_state'), int32(1));
-%                 end
-%                 if obj.EnableAxis1
-%                     coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.requested_state'), int32(1));
-%                 end
+                if obj.EnableAxis0
+                    coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.requested_state'), int32(1));
+                end
+                if obj.EnableAxis1
+                    coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.requested_state'), int32(1));
+                end
             end
         end
         
