@@ -94,18 +94,21 @@ float odrive_read_float(int f, const char parameter[]){
 	float value=-1;
 	char line[60];
 	if(parameter != NULL){
+#ifdef DEBUG_COMUNICATION
+		printf("READ: r %s\n", parameter);
+#endif
 		fprintf(fp, "r %s\n", parameter);
 	}
 	if(fgets(line, 60, fp) == NULL){
-		printf("Reading parameter \"%s\" error, no reply", parameter);
+		printf("Reading parameter \"%s\" error, no reply\n", parameter);
 		return -1;
 	}
 	if(sscanf(line, "%f", &value) != 1){
-		printf("Reading parameter \"%s\" error, reply: %s", parameter, line);
+		printf("Reading parameter \"%s\" error, reply: %s\n", parameter, line);
 		return -1;
 	}
 #ifdef DEBUG_COMUNICATION
-		printf("READ: r %s REPLY: %f\n", parameter, value);
+		printf("REPLY: %f\n", value);
 #endif
 	return value;
 }
@@ -115,6 +118,9 @@ int odrive_read_int(int f, const char parameter[]){
 	int value=-1; 
 	char line[60];
 	if(parameter != NULL){
+#ifdef DEBUG_COMUNICATION
+		printf("READ: r %s\n", parameter);
+#endif
 		fprintf(fp, "r %s\n", parameter);
 	}
 	if(fgets(line, 60, fp) == NULL){
@@ -126,7 +132,7 @@ int odrive_read_int(int f, const char parameter[]){
 		return -1;
 	}
 #ifdef DEBUG_COMUNICATION
-		printf("READ: r %s REPLY: %d\n", parameter, value);
+		printf("REPLY: %d\n", value);
 #endif
 	return value;
 }
@@ -151,7 +157,15 @@ void odrive_quick_write(int f, const char type, const int axis, const float valu
 	FILE *fp = (FILE *) f;
 	fprintf(fp, "%c %d %f\n", type, axis, value);
 #ifdef DEBUG_COMUNICATION
-	printf("WRITE:%c %d %f\n\n", type, axis, value);
+	printf("WRITE:%c %d %f\n", type, axis, value);
+#endif
+}
+
+void odrive_quick_write_int(int f, const char type, const int axis, const int value){
+	FILE *fp = (FILE *) f;
+	fprintf(fp, "%c %d %d\n", type, axis, value);
+#ifdef DEBUG_COMUNICATION
+	printf("WRITE:%c %d %d\n", type, axis, value);
 #endif
 }
 
@@ -190,14 +204,15 @@ void printHelp(int argc, char *argv[]){
 
 typedef void (*test_function)(int f, int argc, char *argv[]);
 
-static double TimeSpecToSeconds(struct timespec* ts)
-{
-    return (double)ts->tv_sec + (double)ts->tv_nsec / 1000000000.0;
+static double now(){
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (double)t.tv_sec + (double)t.tv_nsec / 1000000000.0;
 }
 
 void test1(int f, int argc, char *argv[]){
-	struct timespec start;
-    struct timespec end;
+	double start;
+    double end;
     double elapsedSeconds;
     int iter = 10;
     char *parameter = "vbus_voltage";
@@ -206,22 +221,22 @@ void test1(int f, int argc, char *argv[]){
 
     printf("Testing %d iterations of reading\n", iter);
     // Timed area, use only code which should be measured
-	clock_gettime(CLOCK_MONOTONIC, &start);
+	start = now();
 	for(int i=0; i<iter; i++){
 		odrive_read_float(f, parameter);
 	}
-	clock_gettime(CLOCK_MONOTONIC, &end);
+	end = now();
 	// End of timed area
 
-	elapsedSeconds = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+	elapsedSeconds = end - start;
 	printf("Time elapsed: %f ms (per read %f ms)\n",
 		elapsedSeconds*1000,
 		elapsedSeconds*1000/iter);
 }
 
 void test2(int f, int argc, char *argv[]){
-	struct timespec start;
-    struct timespec end;
+	double start;
+    double end;
     double elapsedSeconds;
     int iter = 10;
     char *parameter = "vbus_voltage";
@@ -230,7 +245,7 @@ void test2(int f, int argc, char *argv[]){
 
     printf("Testing %d iterations of reading\n", iter);
     // Timed area, use only code which should be measured
-	clock_gettime(CLOCK_MONOTONIC, &start);
+	start = now();
 
 	for(int i=0; i<iter; i++){
 		fprintf((FILE *)f, "r %s\n", parameter);
@@ -239,33 +254,33 @@ void test2(int f, int argc, char *argv[]){
 	for(int i=0; i<iter; i++){
 		odrive_read_float(f, NULL);
 	}
-	clock_gettime(CLOCK_MONOTONIC, &end);
+	end = now();
 	// End of timed area
 
-	elapsedSeconds = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+	elapsedSeconds = end - start;
 	printf("Time elapsed: %f ms (per read %f ms)\n",
 		elapsedSeconds*1000,
 		elapsedSeconds*1000/iter);
 }
 
 void test3(int f, int argc, char *argv[]){
-	struct timespec start;
-    struct timespec end;
+	double start;
+    double end;
     double elapsedSeconds;
 
     printf("Testing 8 iterations of reading\n");
     // Timed area, use only code which should be measured
-	clock_gettime(CLOCK_MONOTONIC, &start);
+	start = now();
 
 	fprintf((FILE *)f, "r vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\n");
 
 	for(int i=0; i<8; i++){
 		odrive_read_float(f, NULL);
 	}
-	clock_gettime(CLOCK_MONOTONIC, &end);
+	end = now();
 	// End of timed area
 
-	elapsedSeconds = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+	elapsedSeconds = end - start;
 	printf("Time elapsed: %f ms (per read %f ms)\n",
 		elapsedSeconds*1000,
 		elapsedSeconds*1000/8);
@@ -307,9 +322,72 @@ void test4(int f, int argc, char *argv[]){
 	odrive_wait_for_state(f, 0, 1, 1000000, 0);
 }
 
+void ssleep(double t){
+	usleep(t*1000000);
+}
+
+void test6(int f, int argc, char *argv[]);
+
+void test5(int f, int argc, char *argv[]){
+	printf("Reseting errors\n");
+    odrive_write_int(f, "axis0.motor.error", 0);
+    odrive_write_int(f, "axis0.encoder.error", 0);
+    odrive_write_int(f, "axis0.controller.error", 0);
+    odrive_write_int(f, "axis0.error", 0);
+
+	test4(f, argc, argv);
+	printf("Setting current limit to 100A\n");
+	odrive_write_float(f, "axis0.motor.config.current_lim", 100);
+
+	printf("Setting velocity limit\n");
+	odrive_write_float(f, "axis0.controller.config.vel_limit", 100000);
+
+	printf("Setting to position mode\n");
+	odrive_write_int(f, "axis0.controller.config.control_mode", 3);
+
+	printf("Activating regulator\n");
+	odrive_request_state(f, /*axis=*/0, 8);
+	test6(f, argc, argv);
+	odrive_request_state(f, /*axis=*/0, 1);
+}
+
+void test6(int f, int argc, char *argv[]){
+	printf("Controlling...\n");
+	const double period = 1.0/50.0;
+	const double sim_time = 5.0;
+
+    const double start = now();
+    int i = 0;
+	while(1){
+		double n = now();
+		//if(n >= (start + sim_time)) break;
+
+		//odrive_write_int(f, "axis0.controller.pos_setpoint", i*250);
+		odrive_quick_write_int(f, 'p', 0, (((int)(n-start))%2)?0:5000);
+		//printf("vbus_voltage: %f V\n", odrive_vbus_voltage(f));
+		i++;
+		const double t = period - (now()-n);
+		if(t>0){
+			printf("Sleeping for %fs\n", t);
+			ssleep(t);	
+		}
+	}
+	printf("Controll done\n");
+}
+
+void test7(int f, int argc, char *argv[]){
+	odrive_write_float(f, argv[1], atof(argv[2]));
+}
+
+void test8(int f, int argc, char *argv[]){
+	odrive_quick_write_int(f, 'p', 0, atoi(argv[1]));
+}
+
+
+
 int main(int argc, char *argv[])
 {
-	test_function tests[] = {test1, test1, test2, test3, test4};
+	test_function tests[] = {test1, test1, test2, test3, test4, test5, test6, test7, test8};
 	if(argc < 2){
 		printf("Error: Not enough arguments\n");	
 		printHelp(argc, argv);
@@ -331,6 +409,8 @@ int main(int argc, char *argv[])
 			tests[test_id](f, argc-2, argv+2);
 		}		
 	}
+	printf("Waiting for fclose\n");
 	fclose((FILE *) f);
+	printf("Exiting\n");
 }
 #endif
