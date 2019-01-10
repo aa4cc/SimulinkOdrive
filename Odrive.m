@@ -8,13 +8,15 @@ classdef ODrive < matlab.System ...
     % attributes, and methods that you can implement for a System object in
     % Simulink.
     %
+    
     %#codegen
     properties
         % Public, tunable properties.
     end
     
     properties (Nontunable)
-        Port = '/dev/ttyS0'
+        Port = '/dev/ttyACM0'
+        Autocalibration = 'Disabled (fail if not calibrated)'
     end
 
     properties(Nontunable, PositiveInteger)
@@ -24,28 +26,33 @@ classdef ODrive < matlab.System ...
     properties (Nontunable, Logical)
         EnableAxis0 = true; % Enable
         EnableAxis1 = true; % Enable
-        EnableVbusOutput = false; % Enable vbus_voltage output
+        EnableVbusOutput = false; % Bus voltage output
         EnableCurrent0Output = false; % Enable estimated current output
         EnablePosition0Output = false; % Enable estimated position output
         EnableVelocity0Output = false; % Enable estimated velocity output
         EnableCurrent1Output = false; % Enable estimated current output
         EnablePosition1Output = false; % Enable estimated position output
-        EnableVelocity1Output = false; % Enable estimated veloctity output
+        EnableVelocity1Output = false; % Enable estimated velocity output
+        UseIndex0 = true % Use index input of encoder
+        UseIndex1 = true % Use index input of encoder
+        ResetErrors0 = true; % Reset all error codes
+        ResetErrors1 = true; % Reset all error codes
     end
     
     properties(Nontunable)
-        ControlMode0 = 'Position Control' % Control Mode
-        ControlMode1 = 'Position Control' % Control Mode
+        ControlMode0 = 'Position' % Control Mode
+        ControlMode1 = 'Position' % Control Mode
     end
     
     properties(Constant, Hidden)
-        ControlMode0Set = matlab.system.StringSet({'Position Control','Velocity Control','Current Control'})
-        ControlMode1Set = matlab.system.StringSet({'Position Control','Velocity Control','Current Control'})
+        ControlMode0Set = matlab.system.StringSet({'Position','Velocity','Current'})
+        ControlMode1Set = matlab.system.StringSet({'Position','Velocity','Current'})
+        AutocalibrationSet = matlab.system.StringSet({'Disabled (fail if not calibrated)','Autocalibrate','Autocalibrate and store'})
     end
     
     properties(Nontunable)
-        VelocityLimit0 = 3*pi; % Velocity limit [rad/s]
-        VelocityLimit1 = 3*pi; % Velocity limit [rad/s]
+        VelocityLimit0 = 10*pi; % Velocity limit [rad/s]
+        VelocityLimit1 = 10*pi; % Velocity limit [rad/s]
         CurrentLimit0 = 100; % Current limit [A]
         CurrentLimit1 = 100; % Current limit [A]
         
@@ -61,7 +68,12 @@ classdef ODrive < matlab.System ...
     end
     
     properties (Access = private)
-        % Pre-computed constants.
+        inputParameters = {}
+        outputParameters = {}
+        inputNames = {}
+        outputNames = {}
+        
+        portFilePointer = 0;
     end
     
     methods
@@ -69,27 +81,161 @@ classdef ODrive < matlab.System ...
         function obj = Coils(varargin)
             % Support name-value pair arguments when constructing the object.
             setProperties(obj,nargin,varargin{:});
+            disp('constructor')
         end
     end
     
     methods (Access=protected)
         function setupImpl(obj) 
+            obj.portFilePointer = int32(0);
             if isempty(coder.target)
                 % Place simulation setup code here
             else
+                [~, obj.inputParameters] = obj.generateInputs();
+                [~, obj.outputParameters] = obj.generateOutputs();
                 coder.cinclude('odrive.h');
                 % Call C-function implementing device initialization
-%                 if ~isempty(obj.Port)
-%                     coder.ceval('magman_open', [obj.Port 0], int32(obj.Baud));
-%                 end
+                obj.portFilePointer = coder.ceval('odrive_open_port', cstring(obj.Port), int32(obj.Baudrate));
+                
+                motor0_calibrated = false;
+                motor1_calibrated = false;
+                encoder0_ready = false;
+                encoder1_ready = false;
+                                
+                if obj.EnableAxis0
+                    if obj.ResetErrors0
+                        % Reset all error codes
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.motor.error'), int32(0));
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.encoder.error'), int32(0));
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.controller.error'), int32(0));
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.error'), int32(0));
+                    end
+                    
+                    coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.encoder.config.use_index'), int32(obj.UseIndex0));
+                    coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis0.motor.config.current_lim'), obj.CurrentLimit0);
+                    vel_limit = (obj.VelocityLimit0*obj.CountsPerRotate0)/(2*pi);
+                    coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis0.controller.config.vel_limit'), vel_limit);
+                    motor0_calibrated = coder.ceval('odrive_read_int', obj.portFilePointer, cstring('axis0.motor.is_calibrated'));
+                    encoder0_ready = coder.ceval('odrive_read_int', obj.portFilePointer, cstring('axis0.encoder.is_ready'));
+                end
+                
+                if obj.EnableAxis1
+                    if obj.ResetErrors1
+                        % Reset all error codes
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.motor.error'), int32(0));
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.encoder.error'), int32(0));
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.controller.error'), int32(0));
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.error'), int32(0));
+                    end
+                    coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.encoder.config.use_index'), int32(obj.UseIndex1));
+                    coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis1.motor.config.current_lim'), obj.CurrentLimit1);
+                    vel_limit = (obj.VelocityLimit1*obj.CountsPerRotate1)/(2*pi);
+                    coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis1.controller.config.vel_limit'), vel_limit);
+                    motor1_calibrated = coder.ceval('odrive_read_int', obj.portFilePointer, cstring('axis1.motor.is_calibrated'));
+                    encoder1_ready = coder.ceval('odrive_read_int', obj.portFilePointer, cstring('axis1.encoder.is_ready'));
+                end
+                
+                if(strcmp(obj.Autocalibration,'Disabled (fail if not calibrated)'))
+                    if obj.EnableAxis0 && (~motor0_calibrated || ~encoder0_ready)
+                        error("Axis 0 not ready, need calibration");                            
+                    end
+                    if obj.EnableAxis1 && (~motor1_calibrated || ~encoder1_ready)
+                        error("Axis 1 not ready, need calibration");
+                    end
+                end
+                if(strcmp(obj.Autocalibration,'Autocalibrate'))
+                    if obj.EnableAxis0
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_motor_calibration'), ~motor0_calibrated);
+
+                        if ~encoder0_ready
+                            if obj.UseIndex0
+                                encoder0_precalibrated = false;
+                                encoder0_precalibrated = coder.ceval('odrive_read_int', obj.portFilePointer, cstring('axis0.encoder.config.pre_calibrated'));
+
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_index_search'), true);
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_offset_calibration'), ~encoder0_precalibrated);
+                            else
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_index_search'), false);
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_offset_calibration'), true);
+                            end
+                        else
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_index_search'), false);
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_offset_calibration'), false);
+                        end
+
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.requested_state'), int32(2));
+                    end
+                    if obj.EnableAxis1
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_motor_calibration'), ~motor1_calibrated);
+
+                        if ~encoder1_ready
+                            if obj.UseIndex1
+                                encoder1_precalibrated = false;
+                                encoder1_precalibrated = coder.ceval('odrive_read_int', obj.portFilePointer, cstring('axis1.encoder.config.pre_calibrated'));
+
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_index_search'), true);
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_offset_calibration'), ~encoder1_precalibrated);
+                            else
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_index_search'), false);
+                                coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_offset_calibration'), true);
+                            end
+                        else
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_index_search'), false);
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_offset_calibration'), false);
+                        end
+
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.requested_state'), int32(2));
+                    end
+                    
+                    if obj.EnableAxis0
+                        coder.ceval('odrive_wait_for_state', obj.portFilePointer, int32(0), int32(1), int32(100000), int32(0));
+                    end
+                    
+                    if obj.EnableAxis1
+                        coder.ceval('odrive_wait_for_state', obj.portFilePointer, int32(1), int32(1), int32(100000), int32(0)); 
+                    end
+                end
+                
+                if obj.EnableAxis0
+                    switch(obj.ControlMode0)
+                        case 'Position'
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.controller.config.control_mode'), int32(3));
+                        case 'Velocity'
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.controller.config.control_mode'), int32(2));
+                        case 'Current'
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.controller.config.control_mode'), int32(1));       
+                    end
+                    coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.requested_state'), int32(8));
+                end
+                
+                if obj.EnableAxis1
+                    switch(obj.ControlMode1)
+                        case 'Position'
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.controller.config.control_mode'), int32(3));
+                        case 'Velocity'
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.controller.config.control_mode'), int32(2));
+                        case 'Current'
+                            coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.controller.config.control_mode'), int32(1));       
+                    end
+                    coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.requested_state'), int32(8));
+                end
             end
         end
         
-        function varargout = stepImpl(obj,u)  
+        function varargout = stepImpl(obj, varargin)
             if isempty(coder.target)
                 % Place simulation output code here 
+                for ind = 1:nargout
+                    varargout{ind} = 625+ind;     
+                end
             else
-                
+                for ind = 1:1
+                    %coder.ceval('odrive_write_float', obj.portFilePointer, cstring('odrv0.axis0.controller.pos_setpoint'), varargin{1});
+                end
+                for ind = 1:1
+                    varargout{ind} = 0;
+                    varargout{ind} = coder.ceval('odrive_read_float', obj.portFilePointer, cstring(obj.outputParameters{ind}));
+                end
             end
         end
         
@@ -98,57 +244,113 @@ classdef ODrive < matlab.System ...
                 % Place simulation termination code here
             else
                 % Call C-function implementing device termination
+%                 if obj.EnableAxis0
+%                     coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.requested_state'), int32(1));
+%                 end
+%                 if obj.EnableAxis1
+%                     coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.requested_state'), int32(1));
+%                 end
             end
         end
         
-        function inputs = getAllInputs(obj)
+        function [names, parameters] = generateInputs(obj)
             n = 1;
-            inputs = {};
+            parameters = cell(1, 1);
+            names = cell(1, 1);
             if obj.EnableAxis0
-                mode = strsplit(obj.ControlMode0);
-                inputs{n} = ['Axis0 Refernce ', lower(mode{1})];
-                n = n+1;
+                names{n} = ['Axis 0 Reference ', lower(obj.ControlMode0)];
+                parameters{n} = lower(obj.ControlMode0(1));
+                n=n+1;
             end
             if obj.EnableAxis1
-                mode = strsplit(obj.ControlMode1);
-                inputs{n} = ['Axis1 Refernce ', lower(mode{1})];
-                n = n+1;
+                names{n} = ['Axis 1 Reference ', lower(obj.ControlMode1)];
+                parameters{n} = lower(obj.ControlMode1(1));
+                n=n+1;
             end
             
             if ~isempty(obj.Inputs)
                 for out = strsplit(obj.Inputs, ',')
-                    inputs{n} = out{1};
-                    n = n+1;
+                    parameters{n} = out{1};
+                    names{n} = out{1};
+                    n=n+1;
                 end
             end
+            
+            assert(length(names) == length(parameters));
         end
         
-        function outputs = getAllOutputs(obj)
+        function [names, parameters] = generateOutputs(obj)
             n = 1;
-            outputs = {};
-            
+            parameters = cell(1, 1);
+            names = cell(1, 1);
+            if obj.EnableAxis0
+                if obj.EnableCurrent0Output
+                    parameters{n} = 'axis0.motor.current_control.Iq_measured';
+                    names{n} = 'Axis 0 Measured current [A]';
+                    n=n+1;
+                end
+
+                if obj.EnablePosition0Output
+                    parameters{n} = 'axis0.encoder.pos_estimate';
+                    names{n} = 'Axis 0 Estimated position [rad]';
+                    n=n+1;
+                end
+
+                if obj.EnableVelocity0Output
+                    parameters{n} = 'axis0.encoder.vel_estimate';
+                    names{n} = 'Axis 0 Estimated velocity [rad/s]';
+                    n=n+1;
+                end
+            end
+            if obj.EnableAxis1
+                if obj.EnableCurrent1Output
+                    parameters{n} = 'axis1.motor.current_control.Iq_measured';
+                    names{n} = 'Axis 1 Measured current [A]';
+                    n=n+1;
+                end
+
+                if obj.EnablePosition1Output
+                    parameters{n} = 'axis1.encoder.pos_estimate';
+                    names{n} = 'Axis 1 Estimated position [rad]';
+                    n=n+1;
+                end
+
+                if obj.EnableVelocity1Output
+                    parameters{n} = 'axis1.encoder.vel_estimate';
+                    names{n} = 'Axis 1 Estimated position [rad/s]';
+                    n=n+1;
+                end
+            end
             if obj.EnableVbusOutput
-                outputs{n} = 'vbus_voltage';
-                n = n+1;
+                parameters{n} = 'vbus_voltage';
+                names{n} = 'Bus voltage [V]';
+                n=n+1;
             end
             
             if ~isempty(obj.Outputs)
                 for out = strsplit(obj.Outputs, ',')
-                    outputs{n} = out{1};
-                    n = n+1;
+                    parameters{n} = out{1};
+                    names{n} = out{1};
+                    n=n+1;
                 end
             end
+            
+            assert(length(names) == length(parameters));
         end
+        
+
     end
     
     methods (Access=protected)
         %% Define input properties
         function num = getNumInputsImpl(obj)
-            num = length(obj.getAllInputs());
+            [names, ~] = obj.generateInputs();
+            num = length(names);
         end
         
         function num = getNumOutputsImpl(obj)
-            num = length(obj.getAllOutputs());
+            [names, ~] = obj.generateOutputs();
+            num = length(names);
         end
         
         function flag = isInputSizeLockedImpl(~,~)
@@ -163,10 +365,9 @@ classdef ODrive < matlab.System ...
             flag = true;
         end
         
-        function validateInputsImpl(obj, Input)
+        function validateInputsImpl(obj, varargin)
             if isempty(coder.target)
                 % Run input validation only in Simulation                
-                validateattributes(Input,{'numeric'},{'size',[4,length(obj.Modules)]})
             end
         end
         
@@ -186,13 +387,61 @@ classdef ODrive < matlab.System ...
 
         function varargout = getInputNamesImpl(obj)
             % Return input port names for System block
-            varargout = getAllInputs(obj);
+            [names, ~] = obj.generateInputs();
+            varargout = names;
         end
 
         function varargout = getOutputNamesImpl(obj)
             % Return output port names for System block
-            varargout = getAllOutputs(obj);
+            [names, ~] = obj.generateOutputs();
+            varargout = names;
         end
+
+        function varargout = getOutputSizeImpl(obj)
+            % Return size for each output port
+            varargout = cell(1,nargout);
+            for k = 1:nargout
+                varargout{k} = [1 1];
+
+                % Example: inherit size from first input port
+                % varargout{k} = propagatedInputSize(obj,1);
+            end
+        end
+
+        function varargout = getOutputDataTypeImpl(obj)
+            % Return data type for each output port
+            varargout = cell(1,nargout);
+            for k = 1:nargout
+                varargout{k} = "double";
+
+                % Example: inherit data type from first input port
+                % varargout{k} = propagatedInputDataType(obj,1);
+            end
+        end
+
+        function varargout = isOutputComplexImpl(obj)
+            % Return true for each output port with complex data
+            varargout = cell(1,nargout);
+            for k = 1:nargout
+                varargout{k} = false;
+
+                % Example: inherit complexity from first input port
+                % varargout{k} = propagatedInputComplexity(obj,1);
+            end
+        end
+
+        function varargout = isOutputFixedSizeImpl(obj)
+            % Return true for each output port with fixed size
+            varargout = cell(1,nargout);
+            for k = 1:nargout
+                varargout{k} = true;
+
+                % Example: inherit fixed-size status from first input port
+                % varargout{k} = propagatedInputFixedSize(obj,1);
+            end
+        end
+        
+        
     end
     
     methods (Static, Access=protected)
@@ -206,15 +455,15 @@ classdef ODrive < matlab.System ...
             % group = matlab.system.display.Section(mfilename("class"));
            configGroup = matlab.system.display.Section(...
                'Title','ODrive configuration',...
-               'PropertyList',{'Port','Baudrate'});
+               'PropertyList',{'Port','Baudrate', 'Autocalibration'});
                      
            axis0Group = matlab.system.display.SectionGroup(...
                'Title','Axis 0', ...
-               'PropertyList',{'EnableAxis0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0', 'EnableCurrent0Output', 'EnablePosition0Output', 'EnableVelocity0Output'});
+               'PropertyList',{'EnableAxis0','UseIndex0','ResetErrors0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0', 'EnableCurrent0Output', 'EnablePosition0Output', 'EnableVelocity0Output'});
            
            axis1Group = matlab.system.display.SectionGroup(...
                'Title','Axis 1', ...
-               'PropertyList',{'EnableAxis1','ControlMode1','VelocityLimit1', 'CurrentLimit1', 'CountsPerRotate1', 'EnableCurrent1Output', 'EnablePosition1Output', 'EnableVelocity1Output'});
+               'PropertyList',{'EnableAxis1','UseIndex1','ResetErrors1','ControlMode1','VelocityLimit1', 'CurrentLimit1', 'CountsPerRotate1', 'EnableCurrent1Output', 'EnablePosition1Output', 'EnableVelocity1Output'});
            
            inputsGroup = matlab.system.display.SectionGroup(...
                'Title','Inputs', ...
@@ -262,4 +511,8 @@ classdef ODrive < matlab.System ...
             end
         end
     end
+end
+
+function output = cstring(input)
+    output = [input 0];
 end

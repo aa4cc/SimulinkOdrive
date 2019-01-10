@@ -8,7 +8,7 @@
 
 #include "odrive.h"
 
-//#define DEBUG_COMUNICATION
+#define DEBUG_COMUNICATION
 
 static int set_interface_attribs(int fd, int speed)
 {
@@ -65,8 +65,8 @@ int odrive_open_port(char *portname, int baudrate){
 	int fd;
 	fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
 	if (fd < 0) {
-		printf("Error opening %s: %s\n", portname, strerror(errno));
-		return 0;
+		fprintf(stderr, "Error opening %s: %s\n", portname, strerror(errno));
+		exit(1);
 	}
 
 	int speed = 0;
@@ -74,15 +74,19 @@ int odrive_open_port(char *portname, int baudrate){
 	switch(baudrate){
 		case 115200: speed = B115200; break;
 		default:
-			printf("Unknown baudrate %d\n", baudrate);
-			return 0;
+			fprintf(stderr,"Unknown baudrate %d\n", baudrate);
+			exit(1);
 	}
 
 	/*baudrate 115200, 8 bits, no parity, 1 stop bit */
 	set_interface_attribs(fd, speed);
 	//set_mincount(fd, 0);                /* set to pure timed read */3
 
-	return (int) fdopen(fd, "r+");
+    int f = (int) fdopen(fd, "r+");
+#ifdef DEBUG_COMUNICATION
+    printf("Port oppened with fp: %d\n", f);
+#endif
+	return f;
 }
 
 float odrive_read_float(int f, const char parameter[]){
@@ -91,23 +95,17 @@ float odrive_read_float(int f, const char parameter[]){
 	char line[60];
 	if(parameter != NULL){
 		fprintf(fp, "r %s\n", parameter);
-#ifdef DEBUG_COMUNICATION
-		printf("WRITE:r %s\n", parameter);
-#endif
 	}
 	if(fgets(line, 60, fp) == NULL){
 		printf("Reading parameter \"%s\" error, no reply", parameter);
 		return -1;
 	}
-#ifdef DEBUG_COMUNICATION
-		printf("READ:%s ", line);
-#endif
 	if(sscanf(line, "%f", &value) != 1){
 		printf("Reading parameter \"%s\" error, reply: %s", parameter, line);
 		return -1;
 	}
 #ifdef DEBUG_COMUNICATION
-		printf("VALUE: %f\n", value);
+		printf("READ: r %s REPLY: %f\n", parameter, value);
 #endif
 	return value;
 }
@@ -118,23 +116,17 @@ int odrive_read_int(int f, const char parameter[]){
 	char line[60];
 	if(parameter != NULL){
 		fprintf(fp, "r %s\n", parameter);
-#ifdef DEBUG_COMUNICATION
-		printf("WRITE:r %s\n", parameter);
-#endif
 	}
 	if(fgets(line, 60, fp) == NULL){
 		printf("Reading parameter \"%s\" error, no reply", parameter);
 		return -1;
 	}
-#ifdef DEBUG_COMUNICATION
-		printf("READ:%s", line);
-#endif
 	if(sscanf(line, "%d", &value) != 1){
 		printf("Reading parameter \"%s\" error, reply: %s", parameter, line);
 		return -1;
 	}
 #ifdef DEBUG_COMUNICATION
-		printf("VALUE: %d\n", value);
+		printf("READ: r %s REPLY: %d\n", parameter, value);
 #endif
 	return value;
 }
