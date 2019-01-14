@@ -42,15 +42,15 @@ classdef ODrive < matlab.System ...
     properties(Nontunable)
         ControlMode0 = 'Position' % Control Mode
         ControlMode1 = 'Position' % Control Mode
+        
+        MaxInputParameters = 20; % Maximum number of inputs
+        MaxOutputParameters = 20; % Maximum number of outputs
     end
     
     properties(Constant, Hidden)
         ControlMode0Set = matlab.system.StringSet({'Position','Velocity','Current'})
         ControlMode1Set = matlab.system.StringSet({'Position','Velocity','Current'})
         AutocalibrationSet = matlab.system.StringSet({'Disabled (fail if not calibrated)','Autocalibrate','Autocalibrate and store'})
-        
-        MaxInputParameters = 10;
-        MaxOutputParameters = 10;
     end
     
     properties(Nontunable)
@@ -93,8 +93,8 @@ classdef ODrive < matlab.System ...
             if isempty(coder.target)
                 % Place simulation setup code here
             else
-                [~, obj.inputParameters] = obj.generateInputs();
-                [~, obj.outputParameters] = obj.generateOutputs();
+                [~, obj.inputParameters, ~] = obj.generateInputs();
+                [~, obj.outputParameters, ~] = obj.generateOutputs();
                 coder.cinclude('odrive.h');
                 % Call C-function implementing device initialization
                 obj.portFilePointer = coder.ceval('odrive_open_port', cstring(obj.Port), int32(obj.Baudrate));
@@ -256,36 +256,46 @@ classdef ODrive < matlab.System ...
             end
         end
         
-        function [names, parameters] = generateInputs(obj)
-            n = 1;
-            parameters = cell(1, 1);
-            names = cell(1, 1);
+        function [names, parameters, count] = generateInputs(obj)
+            count = 1;
+            parameters = cell(1, obj.MaxInputParameters);
+            names = cell(1, obj.MaxInputParameters);
             if obj.EnableAxis0
-                names{n} = ['Axis 0 Reference ', lower(obj.ControlMode0)];
-                parameters{n} = lower(obj.ControlMode0(1));
-                n=n+1;
+                names{count} = ['Axis 0 Reference ', lower(obj.ControlMode0)];
+                parameters{count} = lower(obj.ControlMode0(1));
+                count=count+1;
             end
             if obj.EnableAxis1
-                names{n} = ['Axis 1 Reference ', lower(obj.ControlMode1)];
-                parameters{n} = lower(obj.ControlMode1(1));
-                n=n+1;
+                names{count} = ['Axis 1 Reference ', lower(obj.ControlMode1)];
+                parameters{count} = lower(obj.ControlMode1(1));
+                count=count+1;
             end
             
             if ~isempty(obj.Inputs)
                 for out = strsplit(obj.Inputs, ',')
-                    parameters{n} = out{1};
-                    names{n} = out{1};
-                    n=n+1;
+                    parameters{count} = out{1};
+                    names{count} = out{1};
+                    count=count+1;
                 end
             end
             
+            if (count-1) > obj.MaxInputParameters
+                error("Too many inputs, disable some or increase maximum inputs constant in ODrive module");
+            end
+            
             assert(length(names) == length(parameters));
+            
+            for ind = count:obj.MaxInputParameters
+                names{ind} = '';
+                parameters{ind} = '';
+            end
+            count = count - 1;
         end
         
         function [names, parameters, count] = generateOutputs(obj)
             count = 1;
-            parameters = cell(1,20);
-            names = cell(1,20);
+            parameters = cell(1,obj.MaxOutputParameters);
+            names = cell(1,obj.MaxOutputParameters);
             if obj.EnableAxis0
                 if obj.EnableCurrent0Output
                     parameters{count} = 'axis0.motor.current_control.Iq_measured';
@@ -338,7 +348,11 @@ classdef ODrive < matlab.System ...
                 end
             end
             
-            for ind = count:20
+            if (count-1) > obj.MaxOutputParameters
+                error("Too many outputs, disable some or increase maximum outputs constant in ODrive module");
+            end
+            
+            for ind = count:obj.MaxOutputParameters
                 names{ind} = '';
                 parameters{ind} = '';
             end
@@ -351,8 +365,7 @@ classdef ODrive < matlab.System ...
     methods (Access=protected)
         %% Define input properties
         function num = getNumInputsImpl(obj)
-            [names, ~] = obj.generateInputs();
-            num = length(names);
+            [~, ~, num] = obj.generateInputs();
         end
         
         function num = getNumOutputsImpl(obj)
@@ -393,14 +406,12 @@ classdef ODrive < matlab.System ...
 
         function varargout = getInputNamesImpl(obj)
             % Return input port names for System block
-            [names, ~] = obj.generateInputs();
-            varargout = names;
+            [varargout, ~, ~] = obj.generateInputs();
         end
 
         function varargout = getOutputNamesImpl(obj)
             % Return output port names for System block
-            [names, ~] = obj.generateOutputs();
-            varargout = names;
+            [varargout, ~, ~] = obj.generateOutputs();
         end
 
         function varargout = getOutputSizeImpl(obj)
@@ -473,11 +484,11 @@ classdef ODrive < matlab.System ...
            
            inputsGroup = matlab.system.display.SectionGroup(...
                'Title','Inputs', ...
-               'PropertyList',{'Inputs'});
+               'PropertyList',{'MaxInputParameters','Inputs'});
            
            outputsGroup = matlab.system.display.SectionGroup(...
                'Title','Outputs', ...
-               'PropertyList',{'EnableVbusOutput','Outputs'});
+               'PropertyList',{'MaxOutputParameters','EnableVbusOutput','Outputs'});
 
            groups = [configGroup, axis0Group, axis1Group, inputsGroup, outputsGroup];
         end
