@@ -231,9 +231,14 @@ classdef ODrive < matlab.System ...
                     varargout{ind} = 625+ind;     
                 end
             else
-                for ind = 1:1
+                for ind = 1:(nargin-1)
                     %coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis0.controller.pos_setpoint'), varargin{1});
-                    coder.ceval('odrive_quick_write', obj.portFilePointer, int8('p'), int32(0), varargin{1});
+                    if length(obj.inputParameters{ind}) == 1
+                        coder.ceval('odrive_quick_write', obj.portFilePointer, int8(obj.inputParameters{ind}(1)), int32(0), varargin{ind});
+                    else
+                        cs = cstring(obj.inputParameters{ind});
+                        coder.ceval('odrive_write_float', obj.portFilePointer, cs, varargin{ind});
+                    end
                 end
                 for ind = 1:nargout
                     varargout{ind} = 0;
