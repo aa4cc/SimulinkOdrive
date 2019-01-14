@@ -27,16 +27,23 @@ classdef ODrive < matlab.System ...
         EnableAxis0 = true; % Enable
         EnableAxis1 = true; % Enable
         EnableVbusOutput = false; % Bus voltage output
-        EnableCurrent0Output = false; % Enable estimated current output
+
         EnablePosition0Output = false; % Enable estimated position output
         EnableVelocity0Output = false; % Enable estimated velocity output
-        EnableCurrent1Output = false; % Enable estimated current output
+        EnableCurrent0Output = false; % Enable estimated current output
+
         EnablePosition1Output = false; % Enable estimated position output
         EnableVelocity1Output = false; % Enable estimated velocity output
+        EnableCurrent1Output = false; % Enable estimated current output
+
         UseIndex0 = true % Use index input of encoder
         UseIndex1 = true % Use index input of encoder
+
         ResetErrors0 = true; % Reset all error codes
         ResetErrors1 = true; % Reset all error codes
+
+        EnableError0Output = false; % Enable error output
+        EnableError1Output = false; % Enable error output
     end
     
     properties(Nontunable)
@@ -74,7 +81,9 @@ classdef ODrive < matlab.System ...
         inputParameters = {}
         outputParameters = {}
         inputNames = {}
-        outputNames = {}        
+        outputNames = {}
+        inputMultiplier = ones(1, 0);
+        outputMultiplier = ones(1, 0);
         portFilePointer = 0;
     end
     
@@ -93,8 +102,8 @@ classdef ODrive < matlab.System ...
             if isempty(coder.target)
                 % Place simulation setup code here
             else
-                [~, obj.inputParameters, ~] = obj.generateInputs();
-                [~, obj.outputParameters, ~] = obj.generateOutputs();
+                [~, obj.inputParameters, obj.inputMultiplier, ~] = obj.generateInputs();
+                [~, obj.outputParameters, obj.outputMultiplier, ~] = obj.generateOutputs();
                 coder.cinclude('odrive.h');
                 % Call C-function implementing device initialization
                 obj.portFilePointer = coder.ceval('odrive_open_port', cstring(obj.Port), int32(obj.Baudrate));
@@ -232,17 +241,18 @@ classdef ODrive < matlab.System ...
                 end
             else
                 for ind = 1:(nargin-1)
-                    %coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis0.controller.pos_setpoint'), varargin{1});
+                    value = varargin{ind}*obj.inputMultiplier(ind);
                     if length(obj.inputParameters{ind}) == 1
-                        coder.ceval('odrive_quick_write', obj.portFilePointer, int8(obj.inputParameters{ind}(1)), int32(0), varargin{ind});
+                        coder.ceval('odrive_quick_write', obj.portFilePointer, int8(obj.inputParameters{ind}(1)), int32(0), value);
                     else
-                        cs = cstring(obj.inputParameters{ind});
-                        coder.ceval('odrive_write_float', obj.portFilePointer, cs, varargin{ind});
+                        coder.ceval('odrive_write_float', obj.portFilePointer, cstring(obj.inputParameters{ind}), value);
                     end
                 end
                 for ind = 1:nargout
-                    varargout{ind} = 0;
-                    varargout{ind} = coder.ceval('odrive_read_float', obj.portFilePointer, cstring(obj.outputParameters{ind}));
+                    value = 0;
+                    value = coder.ceval('odrive_read_float', obj.portFilePointer, cstring(obj.outputParameters{ind}));
+                    value = value * obj.outputMultiplier(ind);
+                    varargout{ind} = value;
                 end
             end
         end
@@ -261,18 +271,25 @@ classdef ODrive < matlab.System ...
             end
         end
         
-        function [names, parameters, count] = generateInputs(obj)
+        function [names, parameters, multipliers, count] = generateInputs(obj)
             count = 1;
             parameters = cell(1, obj.MaxInputParameters);
             names = cell(1, obj.MaxInputParameters);
+            multipliers = ones(1, obj.MaxInputParameters);
             if obj.EnableAxis0
                 names{count} = ['Axis 0 Reference ', lower(obj.ControlMode0)];
                 parameters{count} = lower(obj.ControlMode0(1));
+                if parameters{count} == 'v' || parameters{count} == 'p'
+                    multipliers(count) = obj.CountsPerRotate0/(2*pi);
+                end
                 count=count+1;
             end
             if obj.EnableAxis1
                 names{count} = ['Axis 1 Reference ', lower(obj.ControlMode1)];
                 parameters{count} = lower(obj.ControlMode1(1));
+                if parameters{count} == 'v' || parameters{count} == 'p'
+                    multipliers(count) = obj.CountsPerRotate0/(2*pi);
+                end
                 count=count+1;
             end
             
@@ -297,45 +314,62 @@ classdef ODrive < matlab.System ...
             count = count - 1;
         end
         
-        function [names, parameters, count] = generateOutputs(obj)
+        function [names, parameters, multipliers, count] = generateOutputs(obj)
             count = 1;
             parameters = cell(1,obj.MaxOutputParameters);
             names = cell(1,obj.MaxOutputParameters);
+            multipliers = ones(1, obj.MaxOutputParameters);
             if obj.EnableAxis0
-                if obj.EnableCurrent0Output
-                    parameters{count} = 'axis0.motor.current_control.Iq_measured';
-                    names{count} = 'Axis 0 Measured current [A]';
-                    count=count+1;
-                end
-
                 if obj.EnablePosition0Output
                     parameters{count} = 'axis0.encoder.pos_estimate';
                     names{count} = 'Axis 0 Estimated position [rad]';
+                    multipliers(count) = (2*pi)/obj.CountsPerRotate0;
                     count=count+1;
                 end
 
                 if obj.EnableVelocity0Output
                     parameters{count} = 'axis0.encoder.vel_estimate';
                     names{count} = 'Axis 0 Estimated velocity [rad/s]';
+                    multipliers(count) = (2*pi)/obj.CountsPerRotate0;
+                    count=count+1;
+                end
+                
+                if obj.EnableCurrent0Output
+                    parameters{count} = 'axis0.motor.current_control.Iq_measured';
+                    names{count} = 'Axis 0 Measured current [A]';
+                    count=count+1;
+                end
+
+                if obj.EnableError0Output
+                    parameters{count} = 'axis0.error';
+                    names{count} = 'Axis 0 Error state';
                     count=count+1;
                 end
             end
             if obj.EnableAxis1
-                if obj.EnableCurrent1Output
-                    parameters{count} = 'axis1.motor.current_control.Iq_measured';
-                    names{count} = 'Axis 1 Measured current [A]';
-                    count=count+1;
-                end
-
                 if obj.EnablePosition1Output
                     parameters{count} = 'axis1.encoder.pos_estimate';
                     names{count} = 'Axis 1 Estimated position [rad]';
+                    multipliers(count) = (2*pi)/obj.CountsPerRotate1;
                     count=count+1;
                 end
 
                 if obj.EnableVelocity1Output
                     parameters{count} = 'axis1.encoder.vel_estimate';
                     names{count} = 'Axis 1 Estimated position [rad/s]';
+                    multipliers(count) = (2*pi)/obj.CountsPerRotate1;
+                    count=count+1;
+                end
+                
+                if obj.EnableCurrent1Output
+                    parameters{count} = 'axis1.motor.current_control.Iq_measured';
+                    names{count} = 'Axis 1 Measured current [A]';
+                    count=count+1;
+                end
+
+                if obj.EnableError1Output
+                     parameters{count} = 'axis1.error';
+                    names{count} = 'Axis 1 Error state';
                     count=count+1;
                 end
             end
@@ -370,11 +404,11 @@ classdef ODrive < matlab.System ...
     methods (Access=protected)
         %% Define input properties
         function num = getNumInputsImpl(obj)
-            [~, ~, num] = obj.generateInputs();
+            [~, ~, ~, num] = obj.generateInputs();
         end
         
         function num = getNumOutputsImpl(obj)
-            [~, ~, num] = obj.generateOutputs();
+            [~, ~, ~, num] = obj.generateOutputs();
         end
         
         function flag = isInputSizeLockedImpl(~,~)
@@ -411,12 +445,12 @@ classdef ODrive < matlab.System ...
 
         function varargout = getInputNamesImpl(obj)
             % Return input port names for System block
-            [varargout, ~, ~] = obj.generateInputs();
+            [varargout, ~, ~, ~] = obj.generateInputs();
         end
 
         function varargout = getOutputNamesImpl(obj)
             % Return output port names for System block
-            [varargout, ~, ~] = obj.generateOutputs();
+            [varargout, ~, ~, ~] = obj.generateOutputs();
         end
 
         function varargout = getOutputSizeImpl(obj)
@@ -481,11 +515,11 @@ classdef ODrive < matlab.System ...
                      
            axis0Group = matlab.system.display.SectionGroup(...
                'Title','Axis 0', ...
-               'PropertyList',{'EnableAxis0','UseIndex0','ResetErrors0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0', 'EnableCurrent0Output', 'EnablePosition0Output', 'EnableVelocity0Output'});
+               'PropertyList',{'EnableAxis0','UseIndex0','ResetErrors0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0', 'EnableCurrent0Output', 'EnablePosition0Output', 'EnableVelocity0Output', 'EnableError0Output'});
            
            axis1Group = matlab.system.display.SectionGroup(...
                'Title','Axis 1', ...
-               'PropertyList',{'EnableAxis1','UseIndex1','ResetErrors1','ControlMode1','VelocityLimit1', 'CurrentLimit1', 'CountsPerRotate1', 'EnableCurrent1Output', 'EnablePosition1Output', 'EnableVelocity1Output'});
+               'PropertyList',{'EnableAxis1','UseIndex1','ResetErrors1','ControlMode1','VelocityLimit1', 'CurrentLimit1', 'CountsPerRotate1', 'EnableCurrent1Output', 'EnablePosition1Output', 'EnableVelocity1Output', 'EnableError1Output'});
            
            inputsGroup = matlab.system.display.SectionGroup(...
                'Title','Inputs', ...
