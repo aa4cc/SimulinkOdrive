@@ -8,8 +8,18 @@
 
 #include "odrive.h"
 
-#define DEBUG_COMUNICATION
+#include <time.h>
 
+double odrive_time(){
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (double)t.tv_sec + (double)t.tv_nsec / 1000000000.0;
+}
+
+void odrive_print_time(double time){
+    printf("ODrive took %.1f ms\n", time*1000);
+}
+        
 static int set_interface_attribs(int fd, int speed)
 {
 	struct termios tty;
@@ -196,19 +206,12 @@ int odrive_request_state(int fp, const int axis, const int requested_state){
 }
 
 #ifdef DEBUG
-#include <time.h>
 
 void printHelp(int argc, char *argv[]){
 	printf("Usage: %s port\n", argv[0]);
 }
 
 typedef void (*test_function)(int f, int argc, char *argv[]);
-
-static double now(){
-	struct timespec t;
-	clock_gettime(CLOCK_MONOTONIC, &t);
-	return (double)t.tv_sec + (double)t.tv_nsec / 1000000000.0;
-}
 
 void test1(int f, int argc, char *argv[]){
 	double start;
@@ -221,11 +224,11 @@ void test1(int f, int argc, char *argv[]){
 
     printf("Testing %d iterations of reading\n", iter);
     // Timed area, use only code which should be measured
-	start = now();
+	start = odrive_time();
 	for(int i=0; i<iter; i++){
 		odrive_read_float(f, parameter);
 	}
-	end = now();
+	end = odrive_time();
 	// End of timed area
 
 	elapsedSeconds = end - start;
@@ -245,7 +248,7 @@ void test2(int f, int argc, char *argv[]){
 
     printf("Testing %d iterations of reading\n", iter);
     // Timed area, use only code which should be measured
-	start = now();
+	start = odrive_time();
 
 	for(int i=0; i<iter; i++){
 		fprintf((FILE *)f, "r %s\n", parameter);
@@ -254,7 +257,7 @@ void test2(int f, int argc, char *argv[]){
 	for(int i=0; i<iter; i++){
 		odrive_read_float(f, NULL);
 	}
-	end = now();
+	end = odrive_time();
 	// End of timed area
 
 	elapsedSeconds = end - start;
@@ -270,14 +273,14 @@ void test3(int f, int argc, char *argv[]){
 
     printf("Testing 8 iterations of reading\n");
     // Timed area, use only code which should be measured
-	start = now();
+	start = odrive_time();
 
 	fprintf((FILE *)f, "r vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\nr vbus_voltage\n");
 
 	for(int i=0; i<8; i++){
 		odrive_read_float(f, NULL);
 	}
-	end = now();
+	end = odrive_time();
 	// End of timed area
 
 	elapsedSeconds = end - start;
@@ -356,17 +359,17 @@ void test6(int f, int argc, char *argv[]){
 	const double period = 1.0/50.0;
 	const double sim_time = 5.0;
 
-    const double start = now();
+    const double start = odrive_time();
     int i = 0;
 	while(1){
-		double n = now();
+		double n = odrive_time();
 		//if(n >= (start + sim_time)) break;
 
 		//odrive_write_int(f, "axis0.controller.pos_setpoint", i*250);
 		odrive_quick_write_int(f, 'p', 0, (((int)(n-start))%2)?0:5000);
 		//printf("vbus_voltage: %f V\n", odrive_vbus_voltage(f));
 		i++;
-		const double t = period - (now()-n);
+		const double t = period - (odrive_time()-n);
 		if(t>0){
 			printf("Sleeping for %fs\n", t);
 			ssleep(t);	

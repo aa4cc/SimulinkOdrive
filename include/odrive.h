@@ -13,5 +13,6 @@ float odrive_vbus_voltage(int fp);
 int odrive_check_calibration(int fp, const int axis);
 int odrive_wait_for_state(int fp, const int axis, const int requested_state, const int _usleep, int n_timeout);
 int odrive_request_state(int fp, const int axis, const int requested_state);
-
+double odrive_time();
+void odrive_print_time(double time);
 #endif

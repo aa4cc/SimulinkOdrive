@@ -26,7 +26,9 @@ classdef ODrive < matlab.System ...
     properties (Nontunable, Logical)
         EnableAxis0 = true; % Enable
         EnableAxis1 = true; % Enable
+        
         EnableVbusOutput = false; % Bus voltage output
+        EnableTiming = false; % Enable block timing
 
         EnablePosition0Output = false; % Enable estimated position output
         EnableVelocity0Output = false; % Enable estimated velocity output
@@ -240,6 +242,12 @@ classdef ODrive < matlab.System ...
                     varargout{ind} = 625+ind;     
                 end
             else
+                startTime = 0;
+                endTime = 0;
+                
+                if obj.EnableTiming
+                    startTime = coder.ceval('odrive_time');
+                end
                 for ind = 1:(nargin-1)
                     value = varargin{ind}*obj.inputMultiplier(ind);
                     if length(obj.inputParameters{ind}) == 1
@@ -253,6 +261,10 @@ classdef ODrive < matlab.System ...
                     value = coder.ceval('odrive_read_float', obj.portFilePointer, cstring(obj.outputParameters{ind}));
                     value = value * obj.outputMultiplier(ind);
                     varargout{ind} = value;
+                end
+                if obj.EnableTiming
+                	endTime = coder.ceval('odrive_time');
+                    coder.ceval('odrive_print_time', endTime-startTime);
                 end
             end
         end
@@ -511,7 +523,7 @@ classdef ODrive < matlab.System ...
             % group = matlab.system.display.Section(mfilename("class"));
            configGroup = matlab.system.display.Section(...
                'Title','ODrive configuration',...
-               'PropertyList',{'Port','Baudrate', 'Autocalibration'});
+               'PropertyList',{'Port','Baudrate', 'Autocalibration', 'EnableTiming'});
                      
            axis0Group = matlab.system.display.SectionGroup(...
                'Title','Axis 0', ...
@@ -562,7 +574,7 @@ classdef ODrive < matlab.System ...
                 addIncludeFiles(buildInfo,'odrive.h',includeDir);
                 addSourceFiles(buildInfo,'odrive.c',srcDir);
                 %addLinkObjects(buildInfo,'sourcelib.a',srcDir);
-                %addCompileFlags(buildInfo,{'-D_DEBUG=1'});
+                addCompileFlags(buildInfo,{'-DDEBUG_COUMNICATION'});
                 %addDefines(buildInfo,'MY_DEFINE_1')
             end
         end
