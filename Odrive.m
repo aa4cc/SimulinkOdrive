@@ -15,7 +15,7 @@ classdef ODrive < matlab.System ...
     end
     
     properties (Nontunable)
-        Port = '/dev/ttyACM0'
+        Port = '/dev/ttyS0'
         Autocalibration = 'Disabled (fail if not calibrated)'
     end
 
@@ -71,8 +71,8 @@ classdef ODrive < matlab.System ...
         CountsPerRotate0 = 8192; % Counts per rotate of encoder
         CountsPerRotate1 = 8192; % Counts per rotate of encoder
        
-        Inputs = ''; % Aditional inputs
-        Outputs = ''; % Aditional outputs
+        Inputs = {}; % Aditional inputs
+        Outputs = {}; % Aditional outputs
     end
     
     properties(Nontunable, Logical)
@@ -306,9 +306,9 @@ classdef ODrive < matlab.System ...
             end
             
             if ~isempty(obj.Inputs)
-                for out = strsplit(obj.Inputs, ',')
-                    parameters{count} = out{1};
-                    names{count} = out{1};
+                for ind = 1:length(obj.Inputs)
+                    parameters{count} = obj.Inputs{ind};
+                    names{count} = obj.Inputs{ind};
                     count=count+1;
                 end
             end
@@ -391,8 +391,8 @@ classdef ODrive < matlab.System ...
                 count=count+1;
             end
             
-            if ~isempty(obj.Outputs)
-                for out = strsplit(obj.Outputs, ',')
+             if ~isempty(obj.Outputs)
+                for out = obj.Outputs
                     parameters{count} = out{1};
                     names{count} = out{1};
                     count=count+1;
