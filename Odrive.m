@@ -48,6 +48,9 @@ classdef ODrive < matlab.System ...
         ControlMode0Set = matlab.system.StringSet({'Position','Velocity','Current'})
         ControlMode1Set = matlab.system.StringSet({'Position','Velocity','Current'})
         AutocalibrationSet = matlab.system.StringSet({'Disabled (fail if not calibrated)','Autocalibrate','Autocalibrate and store'})
+        
+        MaxInputParameters = 10;
+        MaxOutputParameters = 10;
     end
     
     properties(Nontunable)
@@ -71,8 +74,7 @@ classdef ODrive < matlab.System ...
         inputParameters = {}
         outputParameters = {}
         inputNames = {}
-        outputNames = {}
-        
+        outputNames = {}        
         portFilePointer = 0;
     end
     
@@ -233,7 +235,7 @@ classdef ODrive < matlab.System ...
                     %coder.ceval('odrive_write_float', obj.portFilePointer, cstring('axis0.controller.pos_setpoint'), varargin{1});
                     coder.ceval('odrive_quick_write', obj.portFilePointer, int8('p'), int32(0), varargin{1});
                 end
-                for ind = 1:1
+                for ind = 1:nargout
                     varargout{ind} = 0;
                     varargout{ind} = coder.ceval('odrive_read_float', obj.portFilePointer, cstring(obj.outputParameters{ind}));
                 end
@@ -280,63 +282,67 @@ classdef ODrive < matlab.System ...
             assert(length(names) == length(parameters));
         end
         
-        function [names, parameters] = generateOutputs(obj)
-            n = 1;
-            parameters = cell(1, 1);
-            names = cell(1, 1);
+        function [names, parameters, count] = generateOutputs(obj)
+            count = 1;
+            parameters = cell(1,20);
+            names = cell(1,20);
             if obj.EnableAxis0
                 if obj.EnableCurrent0Output
-                    parameters{n} = 'axis0.motor.current_control.Iq_measured';
-                    names{n} = 'Axis 0 Measured current [A]';
-                    n=n+1;
+                    parameters{count} = 'axis0.motor.current_control.Iq_measured';
+                    names{count} = 'Axis 0 Measured current [A]';
+                    count=count+1;
                 end
 
                 if obj.EnablePosition0Output
-                    parameters{n} = 'axis0.encoder.pos_estimate';
-                    names{n} = 'Axis 0 Estimated position [rad]';
-                    n=n+1;
+                    parameters{count} = 'axis0.encoder.pos_estimate';
+                    names{count} = 'Axis 0 Estimated position [rad]';
+                    count=count+1;
                 end
 
                 if obj.EnableVelocity0Output
-                    parameters{n} = 'axis0.encoder.vel_estimate';
-                    names{n} = 'Axis 0 Estimated velocity [rad/s]';
-                    n=n+1;
+                    parameters{count} = 'axis0.encoder.vel_estimate';
+                    names{count} = 'Axis 0 Estimated velocity [rad/s]';
+                    count=count+1;
                 end
             end
             if obj.EnableAxis1
                 if obj.EnableCurrent1Output
-                    parameters{n} = 'axis1.motor.current_control.Iq_measured';
-                    names{n} = 'Axis 1 Measured current [A]';
-                    n=n+1;
+                    parameters{count} = 'axis1.motor.current_control.Iq_measured';
+                    names{count} = 'Axis 1 Measured current [A]';
+                    count=count+1;
                 end
 
                 if obj.EnablePosition1Output
-                    parameters{n} = 'axis1.encoder.pos_estimate';
-                    names{n} = 'Axis 1 Estimated position [rad]';
-                    n=n+1;
+                    parameters{count} = 'axis1.encoder.pos_estimate';
+                    names{count} = 'Axis 1 Estimated position [rad]';
+                    count=count+1;
                 end
 
                 if obj.EnableVelocity1Output
-                    parameters{n} = 'axis1.encoder.vel_estimate';
-                    names{n} = 'Axis 1 Estimated position [rad/s]';
-                    n=n+1;
+                    parameters{count} = 'axis1.encoder.vel_estimate';
+                    names{count} = 'Axis 1 Estimated position [rad/s]';
+                    count=count+1;
                 end
             end
             if obj.EnableVbusOutput
-                parameters{n} = 'vbus_voltage';
-                names{n} = 'Bus voltage [V]';
-                n=n+1;
+                parameters{count} = 'vbus_voltage';
+                names{count} = 'Bus voltage [V]';
+                count=count+1;
             end
             
             if ~isempty(obj.Outputs)
                 for out = strsplit(obj.Outputs, ',')
-                    parameters{n} = out{1};
-                    names{n} = out{1};
-                    n=n+1;
+                    parameters{count} = out{1};
+                    names{count} = out{1};
+                    count=count+1;
                 end
             end
             
-            assert(length(names) == length(parameters));
+            for ind = count:20
+                names{ind} = '';
+                parameters{ind} = '';
+            end
+            count = count - 1;
         end
         
 
@@ -350,8 +356,7 @@ classdef ODrive < matlab.System ...
         end
         
         function num = getNumOutputsImpl(obj)
-            [names, ~] = obj.generateOutputs();
-            num = length(names);
+            [~, ~, num] = obj.generateOutputs();
         end
         
         function flag = isInputSizeLockedImpl(~,~)
