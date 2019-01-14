@@ -114,6 +114,8 @@ classdef ODrive < matlab.System ...
                 motor1_calibrated = false;
                 encoder0_ready = false;
                 encoder1_ready = false;
+
+                should_store_calibration = false;
                                 
                 if obj.EnableAxis0
                     if obj.ResetErrors0
@@ -156,9 +158,13 @@ classdef ODrive < matlab.System ...
                         error("Axis 1 not ready, need calibration");
                     end
                 end
-                if(strcmp(obj.Autocalibration,'Autocalibrate'))
+
+                if startsWith(obj.Autocalibration,'Autocalibrate')
                     if obj.EnableAxis0
                         coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_motor_calibration'), ~motor0_calibrated);
+                        if ~motor0_calibrated
+                            should_store_calibration = true;
+                        end
 
                         if ~encoder0_ready
                             if obj.UseIndex0
@@ -167,9 +173,13 @@ classdef ODrive < matlab.System ...
 
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_index_search'), true);
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_offset_calibration'), ~encoder0_precalibrated);
+                                if ~encoder0_precalibrated
+                                    should_store_calibration = true;
+                                end
                             else
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_index_search'), false);
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_offset_calibration'), true);
+                                should_store_calibration = true;
                             end
                         else
                             coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.config.startup_encoder_index_search'), false);
@@ -178,9 +188,12 @@ classdef ODrive < matlab.System ...
 
                         coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.requested_state'), int32(2));
                     end
+
                     if obj.EnableAxis1
                         coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_motor_calibration'), ~motor1_calibrated);
-
+                        if ~motor1_calibrated
+                            should_store_calibration = true;
+                        end
                         if ~encoder1_ready
                             if obj.UseIndex1
                                 encoder1_precalibrated = false;
@@ -188,9 +201,13 @@ classdef ODrive < matlab.System ...
 
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_index_search'), true);
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_offset_calibration'), ~encoder1_precalibrated);
+                                if ~encoder1_precalibrated
+                                    should_store_calibration = true;
+                                end
                             else
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_index_search'), false);
                                 coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_offset_calibration'), true);
+                                should_store_calibration = true;
                             end
                         else
                             coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.config.startup_encoder_index_search'), false);
@@ -209,6 +226,18 @@ classdef ODrive < matlab.System ...
                     end
                 end
                 
+                if strcmp(obj.Autocalibration, 'Autocalibrate and store') && should_store_calibration
+                    if obj.EnableAxis0
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.motor.config.pre_calibrated'), true);
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis0.encoder.config.pre_calibrated'), true);
+                    end
+                    if obj.EnableAxis1
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.motor.config.pre_calibrated'), true);
+                        coder.ceval('odrive_write_int', obj.portFilePointer, cstring('axis1.encoder.config.pre_calibrated'), true);
+                    end
+                    % TODO Find ASCII command to save configuration
+                end
+
                 if obj.EnableAxis0
                     switch(obj.ControlMode0)
                         case 'Position'
