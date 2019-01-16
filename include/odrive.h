@@ -15,4 +15,5 @@ int odrive_wait_for_state(int fp, const int axis, const int requested_state, con
 int odrive_request_state(int fp, const int axis, const int requested_state);
 double odrive_time();
 void odrive_print_time(double time);
+void odrive_error(const char *error_message);
 #endif

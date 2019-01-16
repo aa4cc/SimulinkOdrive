@@ -19,13 +19,19 @@ double odrive_time(){
 void odrive_print_time(double time){
     printf("ODrive took %.1f ms\n", time*1000);
 }
+
+void odrive_error(const char *error_message){
+    fprintf(stderr, error_message);
+    exit(1);
+}
         
 static int set_interface_attribs(int fd, int speed)
 {
 	struct termios tty;
 
 	if (tcgetattr(fd, &tty) < 0) {
-		printf("Error from tcgetattr: %s\n", strerror(errno));
+		fprintf(stderr, "Error from tcgetattr: %s\n", strerror(errno));
+        exit(1);
 		return -1;
 	}
 
@@ -49,8 +55,8 @@ static int set_interface_attribs(int fd, int speed)
 	tty.c_cc[VTIME] = 1;
 
 	if (tcsetattr(fd, TCSANOW, &tty) != 0) {
-		printf("Error from tcsetattr: %s\n", strerror(errno));
-		return -1;
+		fprintf(stderr, "Error from tcsetattr: %s\n", strerror(errno));
+		exit(1);
 	}
 	return 0;
 }
@@ -60,15 +66,18 @@ static void set_mincount(int fd, int mcount)
 	struct termios tty;
 
 	if (tcgetattr(fd, &tty) < 0) {
-		printf("Error tcgetattr: %s\n", strerror(errno));
+        fprintf(stderr, "Error tcgetattr: %s\n", strerror(errno));
+        exit(1);
 		return;
 	}
 
 	tty.c_cc[VMIN] = mcount ? 1 : 0;
 	tty.c_cc[VTIME] = 5;        /* half second timer */
 
-	if (tcsetattr(fd, TCSANOW, &tty) < 0)
-		printf("Error tcsetattr: %s\n", strerror(errno));
+	if (tcsetattr(fd, TCSANOW, &tty) < 0){
+		fprintf(stderr, "Error tcsetattr: %s\n", strerror(errno));
+        exit(1);
+    }
 }
 
 int odrive_open_port(char *portname, int baudrate){

@@ -152,10 +152,10 @@ classdef ODrive < matlab.System ...
                 
                 if(strcmp(obj.Autocalibration,'Disabled (fail if not calibrated)'))
                     if obj.EnableAxis0 && (~motor0_calibrated || ~encoder0_ready)
-                        error("Axis 0 not ready, need calibration");                            
+                        coder.ceval('odrive_error', cstring('Axis 0 not ready, need calibration'));
                     end
                     if obj.EnableAxis1 && (~motor1_calibrated || ~encoder1_ready)
-                        error("Axis 1 not ready, need calibration");
+                        coder.ceval('odrive_error', cstring('Axis 1 not ready, need calibration'));
                     end
                 end
 
